@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'http://localhost:8080/api',
+  baseURL: 'https://artisanloft-furniture.onrender.com/api',
 });
 
 export const getProducts = () => api.get('/products');

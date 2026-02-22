@@ -7,7 +7,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/products")
-@CrossOrigin(origins = "http://artisan-loft-furniture-frontend.onrender.com") 
+@CrossOrigin(origins = "https://artisan-loft-furniture-frontend.onrender.com") 
 public class FurnitureController {
 
     private final FurnitureService service;

@@ -4,3 +4,28 @@ target/
 bin/
 build/
 *.class
+# secrets
+.env
+.env.*
+!.env.example
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.sqlite3
+
+# node
+node_modules/
+frontend/build/
+
+# editor and AI tool folders (local only)
+.vscode/
+.cursor/
+.agents/
+.claude/
+.windsurf/
+skills-lock.json
+.DS_Store

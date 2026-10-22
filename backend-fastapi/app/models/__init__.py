@@ -1,4 +1,5 @@
-from app.models.product import Product
-from app.models.user import User
+"""Model package — re-exports all ORM classes for convenient imports."""
 
-__all__ = ["Product", "User"]
+from app.models.product import Product
+
+__all__ = ["Product"]

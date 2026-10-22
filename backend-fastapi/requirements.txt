@@ -1,11 +1,11 @@
 fastapi
 uvicorn[standard]
-sqlalchemy
+sqlalchemy[asyncio]
+asyncpg
+greenlet
 pydantic-settings
 python-dotenv
-passlib[bcrypt]
-bcrypt<4.1
-python-jose[cryptography]
+alembic
 email-validator
 pytest
 httpx

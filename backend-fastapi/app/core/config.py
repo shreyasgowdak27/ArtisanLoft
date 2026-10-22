@@ -1,0 +1,61 @@
+"""Application settings loaded from environment variables / .env file.
+
+Uses pydantic-settings; the app fails fast at startup if a required variable is
+missing — better to crash early than to silently use wrong config.
+"""
+
+from pathlib import Path
+from typing import Annotated
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+_ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # Postgres async URL — must start with postgresql+asyncpg://
+    DATABASE_URL: str
+
+    # Auth (kept for legacy; Phase 3 will switch to Supabase JWT verification)
+    JWT_SECRET: str
+    JWT_EXPIRE_MINUTES: int = 60
+
+    # CORS
+    CORS_ORIGINS: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
+
+    # Supabase (needed for Phase 3 auth; declared now so startup validates them)
+    SUPABASE_URL: str = ""
+    SUPABASE_ANON_KEY: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
+
+    # App
+    FRONTEND_URL: str = "http://localhost:3000"
+    ENV: str = "development"
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, str):
+            return [o.strip() for o in value.split(",") if o.strip()]
+        return value
+
+    @field_validator("DATABASE_URL", mode="after")
+    @classmethod
+    def require_asyncpg_scheme(cls, value: str) -> str:
+        if not value.startswith("postgresql+asyncpg://"):
+            raise ValueError(
+                "DATABASE_URL must use the 'postgresql+asyncpg' scheme. "
+                "Update your .env to use postgresql+asyncpg://..."
+            )
+        return value
+
+
+settings = Settings()
+

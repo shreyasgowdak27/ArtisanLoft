@@ -1,22 +1,31 @@
+"""FastAPI application factory.
+
+Startup does NOT create tables via SQLAlchemy — that is Alembic's job.
+`Base.metadata.create_all()` is intentionally absent; always run
+`alembic upgrade head` before starting the app.
+"""
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import settings
-from app.database import Base, engine
-from app.models import Product, User  # noqa: F401 — register models with Base
-from app.routers.auth import router as auth_router
+from app.core.config import settings
+from app.routers.health import router as health_router
 from app.routers.products import router as products_router
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    # Nothing to do on startup: schema is managed by Alembic.
     yield
 
 
-app = FastAPI(title="ArtisanLoft Furniture API", lifespan=lifespan)
+app = FastAPI(
+    title="ArtisanLoft Furniture API",
+    version="0.2.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,9 +36,9 @@ app.add_middleware(
 )
 
 app.include_router(products_router)
-app.include_router(auth_router)
+app.include_router(health_router)
 
 
 @app.get("/")
-def hello_world():
-    return {"message": "Hello World"}
+def root() -> dict[str, str]:
+    return {"message": "ArtisanLoft API v2 — Postgres edition"}

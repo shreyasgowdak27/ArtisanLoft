@@ -1,26 +1,11 @@
-from collections.abc import Generator
+"""Legacy shim — kept so any import that still references app.database doesn't
+crash immediately.  New code should import from app.db.session and app.db.base.
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+TODO: remove this file once all references are updated.
+"""
 
-from app.config import settings
-
-
-connect_args = {}
-if settings.DATABASE_URL.startswith("sqlite"):
-    connect_args = {"check_same_thread": False}
-
-engine = create_engine(settings.DATABASE_URL, connect_args=connect_args)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-class Base(DeclarativeBase):
-    pass
-
-
-def get_db() -> Generator[Session, None, None]:
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+# Re-export the things the old interface provided, mapping to new locations.
+from app.db.base import Base  # noqa: F401
+from app.db.session import AsyncSessionLocal as SessionLocal  # noqa: F401
+from app.db.session import engine  # noqa: F401
+from app.db.session import get_db  # noqa: F401

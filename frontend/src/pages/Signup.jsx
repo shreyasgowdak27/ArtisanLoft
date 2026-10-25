@@ -8,14 +8,14 @@ export default function Signup() {
     name: '',
     email: '',
     phone: '',
-    username: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
   });
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { isAuthenticated, register } = useAuth();
+  const { isAuthenticated, signup } = useAuth();
   const toast = useToast();
 
   if (isAuthenticated) {
@@ -30,33 +30,50 @@ export default function Signup() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    setLoading(true);
+    setNotice('');
 
-    if (!formData.name || !formData.email || !formData.username || !formData.password) {
+    if (!formData.name.trim() || !formData.email.trim() || !formData.password) {
       setError('Please fill in all required fields');
-      setLoading(false);
       return;
     }
 
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
-      setLoading(false);
       return;
     }
 
     if (formData.password.length < 6) {
       setError('Password must be at least 6 characters');
-      setLoading(false);
       return;
     }
 
-    const result = register(formData);
+    setLoading(true);
+
+    const result = await signup({
+      name: formData.name,
+      email: formData.email,
+      phone: formData.phone,
+      password: formData.password,
+    });
+
     if (result.success) {
-      toast.success('Account created successfully! Welcome to ArtisanLoft.');
-      navigate('/profile');
+      if (result.needsEmailConfirmation) {
+        setNotice(
+          'Account created successfully! Please check your inbox to confirm your email before signing in.'
+        );
+        if (toast?.info) {
+          toast.info('Please check your email to confirm your account.');
+        }
+      } else {
+        if (toast?.success) {
+          toast.success('Account created successfully! Welcome to ArtisanLoft.');
+        }
+        navigate('/profile');
+      }
     } else {
-      setError(result.error);
+      setError(result.error || 'Failed to create account.');
     }
+
     setLoading(false);
   };
 
@@ -67,87 +84,100 @@ export default function Signup() {
           <h2 className="text-3xl font-serif mb-2">Create Account</h2>
           <p className="text-stone-400 text-sm">Join the ArtisanLoft family</p>
         </div>
-        
+
         <form className="space-y-5" onSubmit={handleSubmit}>
           {error && (
-            <div className="p-4 bg-red-50 border border-red-200 text-red-700 text-sm">
+            <div className="p-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded">
               {error}
             </div>
           )}
-          
+
+          {notice && (
+            <div className="p-4 bg-green-50 border border-green-200 text-green-800 text-sm rounded">
+              {notice}
+            </div>
+          )}
+
           <div>
-            <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">Full Name *</label>
-            <input 
+            <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
+              Full Name *
+            </label>
+            <input
               type="text"
               name="name"
+              required
               value={formData.name}
               onChange={handleChange}
               className="w-full p-3 bg-stone-50 border border-stone-200 outline-none focus:border-stone-900 transition-colors"
               placeholder="Rahul Sharma"
+              autoComplete="name"
             />
           </div>
 
           <div>
-            <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">Email Address *</label>
-            <input 
+            <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
+              Email Address *
+            </label>
+            <input
               type="email"
               name="email"
+              required
               value={formData.email}
               onChange={handleChange}
               className="w-full p-3 bg-stone-50 border border-stone-200 outline-none focus:border-stone-900 transition-colors"
               placeholder="rahul@example.com"
+              autoComplete="email"
             />
           </div>
 
           <div>
-            <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">Phone Number</label>
-            <input 
+            <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
+              Phone Number
+            </label>
+            <input
               type="tel"
               name="phone"
               value={formData.phone}
               onChange={handleChange}
               className="w-full p-3 bg-stone-50 border border-stone-200 outline-none focus:border-stone-900 transition-colors"
               placeholder="+91 98765 43210"
+              autoComplete="tel"
             />
           </div>
 
           <div>
-            <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">Username *</label>
-            <input 
-              type="text"
-              name="username"
-              value={formData.username}
-              onChange={handleChange}
-              className="w-full p-3 bg-stone-50 border border-stone-200 outline-none focus:border-stone-900 transition-colors"
-              placeholder="rahul.sharma"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">Password *</label>
-            <input 
+            <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
+              Password *
+            </label>
+            <input
               type="password"
               name="password"
+              required
               value={formData.password}
               onChange={handleChange}
               className="w-full p-3 bg-stone-50 border border-stone-200 outline-none focus:border-stone-900 transition-colors"
               placeholder="••••••••"
+              autoComplete="new-password"
             />
           </div>
 
           <div>
-            <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">Confirm Password *</label>
-            <input 
+            <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
+              Confirm Password *
+            </label>
+            <input
               type="password"
               name="confirmPassword"
+              required
               value={formData.confirmPassword}
               onChange={handleChange}
               className="w-full p-3 bg-stone-50 border border-stone-200 outline-none focus:border-stone-900 transition-colors"
               placeholder="••••••••"
+              autoComplete="new-password"
             />
           </div>
-          
-          <button 
+
+          <button
             type="submit"
             disabled={loading}
             className="w-full py-4 bg-orange-500 text-white font-semibold uppercase tracking-widest text-sm hover:bg-orange-600 transition-colors disabled:bg-orange-300"

@@ -9,3 +9,4 @@ alembic
 email-validator
 pytest
 httpx
+pyjwt[crypto]

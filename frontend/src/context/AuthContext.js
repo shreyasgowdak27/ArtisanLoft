@@ -1,100 +1,189 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 
 const AuthContext = createContext();
 
+const normalizeUser = (supabaseUser) => {
+  if (!supabaseUser) return null;
+  const metadata = supabaseUser.user_metadata || {};
+  const name =
+    metadata.full_name ||
+    metadata.name ||
+    supabaseUser.email?.split('@')[0] ||
+    'Artisan Member';
+
+  return {
+    ...supabaseUser,
+    id: supabaseUser.id,
+    email: supabaseUser.email,
+    name,
+    phone: metadata.phone || supabaseUser.phone || '',
+    city: metadata.city || '',
+    role: supabaseUser.app_metadata?.role || metadata.role || 'customer',
+    joinDate: supabaseUser.created_at
+      ? supabaseUser.created_at.split('T')[0]
+      : new Date().toISOString().split('T')[0],
+    avatar:
+      metadata.avatar ||
+      `https://ui-avatars.com/api/?name=${encodeURIComponent(
+        name
+      )}&background=3b2a1e&color=fff&size=128`,
+  };
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const [session, setSession] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('artisanloft_user');
-    if (savedUser) {
-      const userData = JSON.parse(savedUser);
-      setUser(userData);
-      setIsAuthenticated(true);
-    }
+    let isMounted = true;
+
+    // 1. Fetch current active session on mount
+    supabase.auth
+      .getSession()
+      .then(({ data: { session: activeSession } }) => {
+        if (isMounted) {
+          setSession(activeSession);
+          setUser(normalizeUser(activeSession?.user));
+          setIsAuthenticated(Boolean(activeSession?.user));
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.error('Error fetching Supabase session:', err);
+        if (isMounted) {
+          setLoading(false);
+        }
+      });
+
+    // 2. Listen to auth state transitions
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+      if (isMounted) {
+        setSession(currentSession);
+        setUser(normalizeUser(currentSession?.user));
+        setIsAuthenticated(Boolean(currentSession?.user));
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const login = (username, password) => {
-    const defaultUsers = {
-      'admin': { password: 'admin123', role: 'ADMIN', name: 'Admin User', email: 'admin@artisanloft.in', phone: '+91 80 4567 8900' },
-      'user': { password: 'password', role: 'USER', name: 'Guest User', email: 'guest@example.com', phone: '+91 98765 43210' },
-      'rahul.sharma': { password: 'rahul123', role: 'USER', name: 'Rahul Sharma', email: 'rahul.sharma@gmail.com', phone: '+91 98765 12345' },
-      'priya.patel': { password: 'priya123', role: 'USER', name: 'Priya Patel', email: 'priya.patel@gmail.com', phone: '+91 87654 32100' }
-    };
+  const login = async (email, password) => {
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
-    const registeredUsers = JSON.parse(localStorage.getItem('artisanloft_registered_users') || '{}');
-    const allUsers = { ...defaultUsers, ...registeredUsers };
+      if (error) {
+        return { success: false, error: error.message };
+      }
 
-    const userInfo = allUsers[username];
-    if (userInfo && userInfo.password === password) {
-      const userData = {
-        username,
-        name: userInfo.name,
-        email: userInfo.email,
-        phone: userInfo.phone || '+91 98765 43210',
-        role: userInfo.role,
-        joinDate: userInfo.joinDate || '2024-01-15',
-        city: userInfo.city || 'Bangalore',
-        avatar: userInfo.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userInfo.name)}&background=ea580c&color=fff&size=128`
-      };
-      setUser(userData);
+      setSession(data.session);
+      setUser(normalizeUser(data.user));
       setIsAuthenticated(true);
-      localStorage.setItem('artisanloft_user', JSON.stringify(userData));
-      return { success: true };
+      return { success: true, data };
+    } catch (err) {
+      return { success: false, error: err.message || 'Failed to sign in' };
     }
-    return { success: false, error: 'Invalid username or password' };
   };
 
-  const logout = () => {
-    setUser(null);
-    setIsAuthenticated(false);
-    localStorage.removeItem('artisanloft_user');
-  };
+  const signup = async (formData) => {
+    try {
+      const email = formData.email?.trim();
+      const password = formData.password;
+      const name = formData.name?.trim() || '';
+      const phone = formData.phone?.trim() || '';
+      const city = formData.city?.trim() || '';
 
-  const updateProfile = (updates) => {
-    const updatedUser = { ...user, ...updates };
-    setUser(updatedUser);
-    localStorage.setItem('artisanloft_user', JSON.stringify(updatedUser));
-  };
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            name,
+            full_name: name,
+            phone,
+            city,
+          },
+        },
+      });
 
-  const register = (formData) => {
-    const existingUsers = JSON.parse(localStorage.getItem('artisanloft_registered_users') || '{}');
-    
-    if (existingUsers[formData.username]) {
-      return { success: false, error: 'Username already exists' };
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      // If Supabase has email confirmation turned off, session is returned immediately
+      if (data.session) {
+        setSession(data.session);
+        setUser(normalizeUser(data.user));
+        setIsAuthenticated(true);
+      }
+
+      return {
+        success: true,
+        data,
+        needsEmailConfirmation: !data.session,
+      };
+    } catch (err) {
+      return { success: false, error: err.message || 'Failed to sign up' };
     }
+  };
 
-    const newUser = {
-      username: formData.username,
-      name: formData.name,
-      email: formData.email,
-      phone: formData.phone || '',
-      role: 'USER',
-      joinDate: new Date().toISOString().split('T')[0],
-      city: '',
-      avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(formData.name)}&background=ea580c&color=fff&size=128`
-    };
+  const logout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('Error signing out:', err);
+    } finally {
+      setUser(null);
+      setSession(null);
+      setIsAuthenticated(false);
+    }
+  };
 
-    existingUsers[formData.username] = { ...newUser, password: formData.password };
-    localStorage.setItem('artisanloft_registered_users', JSON.stringify(existingUsers));
+  const updateProfile = async (updates) => {
+    try {
+      const { data, error } = await supabase.auth.updateUser({
+        data: updates,
+      });
 
-    setUser(newUser);
-    setIsAuthenticated(true);
-    localStorage.setItem('artisanloft_user', JSON.stringify(newUser));
-    
-    return { success: true };
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      if (data?.user) {
+        setUser(normalizeUser(data.user));
+      }
+      return { success: true, data };
+    } catch (err) {
+      return { success: false, error: err.message || 'Failed to update profile' };
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      isAuthenticated, 
-      login, 
-      logout, 
-      updateProfile,
-      register
-    }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        token: session?.access_token || null,
+        isAuthenticated,
+        loading,
+        login,
+        signup,
+        register: signup,
+        logout,
+        updateProfile,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

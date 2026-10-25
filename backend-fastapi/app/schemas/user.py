@@ -1,27 +1,18 @@
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict
 
 
-class UserSignup(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    email: EmailStr
-    password: str = Field(min_length=1)
+class CurrentUser(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
+    id: str
+    email: str | None = None
 
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
+    def __getitem__(self, item: str):
+        return getattr(self, item)
 
 
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
-    name: str
-    email: EmailStr
-    phone: str | None = None
-    city: str | None = None
-
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
+    id: str
+    email: str | None = None

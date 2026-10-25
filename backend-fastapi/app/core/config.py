@@ -30,10 +30,17 @@ class Settings(BaseSettings):
     # CORS
     CORS_ORIGINS: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
 
-    # Supabase (needed for Phase 3 auth; declared now so startup validates them)
+    # Supabase (used for Supabase Auth JWT verification)
     SUPABASE_URL: str = ""
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
+
+    @property
+    def supabase_jwks_url(self) -> str:
+        base = self.SUPABASE_URL.strip().rstrip("/")
+        if base and not base.startswith("http://") and not base.startswith("https://"):
+            base = f"https://{base}"
+        return f"{base}/auth/v1/.well-known/jwks.json"
 
     # App
     FRONTEND_URL: str = "http://localhost:3000"

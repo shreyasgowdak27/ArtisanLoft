@@ -398,3 +398,84 @@ def test_lock_products_statement_enforces_sorted_for_update():
 
     assert "FOR UPDATE" in sql
     assert "ORDER BY products.id ASC" in sql
+
+
+@pytest.mark.anyio
+async def test_create_order_serializes_response():
+    """AC-1 & regression: runs create_order, verifies ORM persistence doesn't raise NoReferencedTableError, and serializes response cleanly."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    test_engine = create_engine("sqlite:///:memory:")
+    Order.__table__.create(test_engine)
+    OrderItem.__table__.create(test_engine)
+
+    with Session(test_engine) as test_session:
+        oid = uuid.uuid4()
+        item = OrderItem(
+            id=uuid.uuid4(),
+            order_id=oid,
+            product_id=PRODUCT_A_ID,
+            product_name="Oak Table",
+            unit_price_cents=2999900,
+            quantity=2,
+            line_total_cents=5999800,
+        )
+        order_obj = Order(
+            id=oid,
+            user_id=uuid.UUID(USER_A),
+            status="pending",
+            total_cents=5999800,
+            shipping_name="Shreyas Gowda",
+            shipping_line1="12 MG Road",
+            shipping_city="Bengaluru",
+            shipping_state="Karnataka",
+            shipping_pincode="560001",
+            shipping_country="IN",
+            items=[item],
+        )
+        test_session.add(order_obj)
+        # Flush succeeds without raising NoReferencedTableError for auth.users
+        test_session.flush()
+
+    db = AsyncMock()
+    db.add = MagicMock()
+    cart_item = CartItem(
+        id=uuid.uuid4(),
+        user_id=uuid.UUID(USER_A),
+        product_id=PRODUCT_A_ID,
+        quantity=2,
+    )
+    product = Product(
+        id=PRODUCT_A_ID,
+        name="Oak Table",
+        slug="oak-table",
+        price_cents=2999900,
+        stock=10,
+        is_active=True,
+    )
+    cart_result = MagicMock()
+    cart_result.scalars.return_value.all.return_value = [cart_item]
+    prod_result = MagicMock()
+    prod_result.scalars.return_value.all.return_value = [product]
+    del_result = MagicMock()
+    db.execute.side_effect = [cart_result, prod_result, del_result]
+
+    payload = OrderCreate(**VALID_SHIPPING_PAYLOAD)
+    order_read = await order_service.create_order(db, USER_A, payload)
+
+    # Test serialization of response model
+    dumped = order_read.model_dump(mode="json")
+    assert dumped["id"] == str(order_read.id)
+    assert dumped["status"] == "pending"
+    assert dumped["total_cents"] == 5999800
+    assert isinstance(dumped["total_cents"], int)
+    assert len(dumped["items"]) == 1
+    assert dumped["items"][0]["product_name"] == "Oak Table"
+    assert dumped["items"][0]["unit_price_cents"] == 2999900
+    assert isinstance(dumped["items"][0]["unit_price_cents"], int)
+    assert dumped["items"][0]["quantity"] == 2
+    assert dumped["items"][0]["line_total_cents"] == 5999800
+    assert isinstance(dumped["items"][0]["line_total_cents"], int)
+    assert "created_at" in dumped
+

@@ -10,6 +10,7 @@ build/
 !.env.example
 
 # python
+.venv
 .venv/
 __pycache__/
 *.pyc

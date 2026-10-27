@@ -49,14 +49,14 @@ async def _get_product(db: AsyncSession, product_id: uuid.UUID) -> Product:
 async def _require_available_product(db: AsyncSession, product_id: uuid.UUID, quantity: int) -> Product:
     product = await _get_product(db, product_id)
     if not product.is_active:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Product is unavailable")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Product is unavailable")
     if quantity > product.stock:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Requested quantity exceeds stock")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requested quantity exceeds stock")
     return product
 
 
 def _add_item_statement(user_id: uuid.UUID, product_id: uuid.UUID, quantity: int):
-    stock_limit = select(Product.stock).where(Product.id == CartItem.product_id, Product.is_active.is_(True)).scalar_subquery()
+    stock_limit = select(Product.stock).where(Product.id == product_id, Product.is_active.is_(True)).scalar_subquery()
     insert_values = select(literal(user_id), Product.id, literal(quantity)).where(Product.id == product_id, Product.is_active.is_(True), Product.stock >= quantity)
     return (
         insert(CartItem)
@@ -82,8 +82,13 @@ async def add_item(db: AsyncSession, user_id: str, payload: CartItemAdd) -> Cart
     owner_id = _user_uuid(user_id)
     result = await db.execute(_add_item_statement(owner_id, payload.product_id, payload.quantity))
     if result.scalar_one_or_none() is None:
-        await _require_available_product(db, payload.product_id, payload.quantity)
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Requested quantity exceeds the cart or stock limit")
+        product = await _require_available_product(db, payload.product_id, payload.quantity)
+        existing_item = await db.scalar(
+            select(CartItem).where(CartItem.user_id == owner_id, CartItem.product_id == payload.product_id)
+        )
+        if existing_item is not None and existing_item.quantity + payload.quantity > product.stock:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requested quantity exceeds stock")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requested quantity exceeds the cart or stock limit")
     await db.commit()
     return await _get_cart_item(db, owner_id, payload.product_id)
 
@@ -98,7 +103,7 @@ async def update_item(db: AsyncSession, user_id: str, product_id: uuid.UUID, pay
         await db.commit()
         return None
 
-    stock_limit = select(Product.stock).where(Product.id == CartItem.product_id, Product.is_active.is_(True)).scalar_subquery()
+    stock_limit = select(Product.stock).where(Product.id == product_id, Product.is_active.is_(True)).scalar_subquery()
     result = await db.execute(
         update(CartItem)
         .where(CartItem.user_id == owner_id, CartItem.product_id == product_id, payload.quantity <= stock_limit)
@@ -106,8 +111,13 @@ async def update_item(db: AsyncSession, user_id: str, product_id: uuid.UUID, pay
         .returning(CartItem.id)
     )
     if result.scalar_one_or_none() is None:
+        existing_item = await db.scalar(
+            select(CartItem.id).where(CartItem.user_id == owner_id, CartItem.product_id == product_id)
+        )
+        if existing_item is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cart item not found")
         await _require_available_product(db, product_id, payload.quantity)
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cart item not found")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Requested quantity exceeds stock")
     await db.commit()
     return await _get_cart_item(db, owner_id, product_id)
 

@@ -7,7 +7,7 @@ import { ArrowRight, Truck, ShieldCheck, Leaf, Award, CreditCard, IndianRupee } 
 const CATEGORIES = [
   { name: 'Living Room', image: 'https://images.unsplash.com/photo-1493663284031-b7e3aefcae8e?auto=format&fit=crop&w=600', count: 6 },
   { name: 'Dining', image: 'https://images.unsplash.com/photo-1617806118233-18e1de247200?auto=format&fit=crop&w=600', count: 5 },
-  { name: 'Bedroom', image: 'https://images.unsplash.com/photo-1505693357370-58c35b54718b?auto=format&fit=crop&w=600', count: 6 },
+  { name: 'Bedroom', image: 'https://images.unsplash.com/photo-1616594039964-ae9021a400a0?auto=format&fit=crop&w=600', count: 6 },
   { name: 'Office', image: 'https://images.unsplash.com/photo-1518455027359-f3f8164ba6bd?auto=format&fit=crop&w=600', count: 5 },
   { name: 'Outdoor', image: 'https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=600', count: 4 },
   { name: 'Lighting', image: 'https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=600', count: 4 },
@@ -153,6 +153,9 @@ export default function Home() {
                 <img 
                   src={category.image}
                   alt={category.name}
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>

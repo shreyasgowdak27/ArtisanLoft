@@ -15,7 +15,7 @@ export default function Login() {
   const { login, isAuthenticated } = useAuth();
   const toast = useToast();
 
-  const from = location.state?.from?.pathname || '/profile';
+  const from = location.state?.from?.pathname || (typeof location.state?.from === 'string' ? location.state.from : '/profile');
 
   if (isAuthenticated) {
     navigate(from);
@@ -62,7 +62,7 @@ export default function Login() {
               </svg>
             </div>
             <p className="text-lg font-serif text-stone-800">Welcome back!</p>
-            <p className="text-stone-500 text-sm mt-2">Redirecting to profile...</p>
+            <p className="text-stone-500 text-sm mt-2">Redirecting...</p>
           </div>
         ) : (
           <form className="space-y-6" onSubmit={handleSubmit}>

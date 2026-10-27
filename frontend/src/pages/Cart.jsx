@@ -396,9 +396,7 @@ export default function Cart() {
 
             <button
               type="button"
-              onClick={() => {
-                toast.info('Checkout flow will be available in Phase 5!');
-              }}
+              onClick={() => navigate('/checkout')}
               className="w-full py-4 bg-stone-900 text-white font-semibold uppercase tracking-widest text-xs hover:bg-stone-800 transition-colors mb-3 rounded-sm shadow-sm"
             >
               Proceed to Checkout

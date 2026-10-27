@@ -59,7 +59,7 @@ export const CartProvider = ({ children }) => {
     }
   }, [authLoading, fetchCart]);
 
-  const addToCart = async (productOrId, quantity = 1) => {
+  const addToCart = useCallback(async (productOrId, quantity = 1) => {
     const productId = typeof productOrId === 'object' && productOrId !== null ? productOrId.id : productOrId;
     try {
       const res = await addToCartApi(productId, quantity);
@@ -69,9 +69,9 @@ export const CartProvider = ({ children }) => {
       const message = extractErrorMessage(err, 'Failed to add item to cart');
       return { success: false, error: message };
     }
-  };
+  }, [fetchCart]);
 
-  const updateQuantity = async (productOrId, quantity) => {
+  const updateQuantity = useCallback(async (productOrId, quantity) => {
     const productId = typeof productOrId === 'object' && productOrId !== null ? productOrId.id : productOrId;
     try {
       if (quantity <= 0) {
@@ -85,9 +85,9 @@ export const CartProvider = ({ children }) => {
       const message = extractErrorMessage(err, 'Failed to update item quantity');
       return { success: false, error: message };
     }
-  };
+  }, [fetchCart]);
 
-  const removeFromCart = async (productOrId) => {
+  const removeFromCart = useCallback(async (productOrId) => {
     const productId = typeof productOrId === 'object' && productOrId !== null ? productOrId.id : productOrId;
     try {
       await deleteCartItemApi(productId);
@@ -97,7 +97,12 @@ export const CartProvider = ({ children }) => {
       const message = extractErrorMessage(err, 'Failed to remove item from cart');
       return { success: false, error: message };
     }
-  };
+  }, [fetchCart]);
+
+  const clearCart = useCallback(() => {
+    setCart(INITIAL_CART);
+    setError(null);
+  }, []);
 
   const cartItems = cart?.items || [];
   const cartCount = cart?.total_quantity || 0;
@@ -114,6 +119,7 @@ export const CartProvider = ({ children }) => {
         addToCart,
         updateQuantity,
         removeFromCart,
+        clearCart,
       }}
     >
       {children}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { getProductById, createOrder } from '../api/api';
+import { getProductById } from '../api/api';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -122,20 +122,29 @@ export default function ProductDetail() {
     }
   };
 
-  const handleOrder = async () => {
+  const handleBuyNow = async () => {
+    if (isOutOfStock) {
+      toast.error('This product is currently out of stock');
+      return;
+    }
+
+    if (!isAuthenticated) {
+      // Store pending buy now item in sessionStorage so checkout loads it once logged in
+      sessionStorage.setItem('pending_buy_now', JSON.stringify({ productId: product.id, quantity }));
+      navigate('/login', { state: { from: { pathname: '/checkout' } } });
+      return;
+    }
+
     setOrdering(true);
-    try {
-      await createOrder({
-        customerName: 'Guest User',
-        customerEmail: 'guest@example.com',
-        totalAmount: product.price * quantity,
-      });
-      toast.success('Order placed successfully! You will receive a confirmation shortly.');
-      navigate('/profile');
-    } catch (err) {
-      toast.error('Something went wrong. Please try again.');
-    } finally {
-      setOrdering(false);
+    setCartError('');
+    const result = await addToCart(product.id, quantity);
+    setOrdering(false);
+
+    if (result.success) {
+      navigate('/checkout');
+    } else {
+      setCartError(result.error);
+      toast.error(result.error || 'Failed to add item for checkout');
     }
   };
 
@@ -393,7 +402,7 @@ export default function ProductDetail() {
               )}
             </button>
             <button
-              onClick={handleOrder}
+              onClick={handleBuyNow}
               disabled={ordering || isOutOfStock}
               className={`flex-1 py-4 font-semibold uppercase tracking-widest text-sm transition-colors ${
                 isOutOfStock
@@ -401,7 +410,7 @@ export default function ProductDetail() {
                   : 'bg-orange-500 text-white hover:bg-orange-600 disabled:bg-orange-300'
               }`}
             >
-              {ordering ? 'Processing...' : 'Buy Now'}
+              {ordering ? 'Adding to Cart...' : 'Buy Now'}
             </button>
           </div>
 

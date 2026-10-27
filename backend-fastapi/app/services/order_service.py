@@ -136,6 +136,9 @@ async def create_order(
         await db.execute(delete(CartItem).where(CartItem.user_id == owner_id))
 
         await db.commit()
+        # Refresh order and eagerly load items after commit (expire_on_commit=True
+        # invalidates in-memory attributes; async sessions cannot lazy-load).
+        await db.refresh(order, ["items"])
         return OrderRead.model_validate(order)
     except Exception:
         await db.rollback()

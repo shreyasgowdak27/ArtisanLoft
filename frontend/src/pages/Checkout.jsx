@@ -145,9 +145,13 @@ export default function Checkout() {
       navigate(`/order-success/${createdOrder.id}`, { state: { order: createdOrder } });
     } catch (err) {
       console.error('Order creation failed:', err);
-      // Extract exact backend error detail (e.g. 400 over-stock message)
+      // Extract exact backend error detail (e.g. 400 over-stock message).
+      // err.response is present for any HTTP response (4xx, 5xx); its absence
+      // means a genuine network failure (server unreachable, CORS preflight blocked).
       const detail = err.response?.data?.detail;
-      let errorMessage = 'Failed to place order. Please try again.';
+      let errorMessage = err.response
+        ? 'Failed to place order. Please try again.'
+        : 'Network error — unable to reach the server. Please check your connection.';
 
       if (typeof detail === 'string') {
         errorMessage = detail;
@@ -529,3 +533,4 @@ export default function Checkout() {
     </div>
   );
 }
+

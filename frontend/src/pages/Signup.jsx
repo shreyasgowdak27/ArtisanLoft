@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import PasswordInput from '../components/PasswordInput';
 
 export default function Signup() {
   const [formData, setFormData] = useState({
@@ -149,8 +150,7 @@ export default function Signup() {
             <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
               Password *
             </label>
-            <input
-              type="password"
+            <PasswordInput
               name="password"
               required
               value={formData.password}
@@ -165,8 +165,7 @@ export default function Signup() {
             <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
               Confirm Password *
             </label>
-            <input
-              type="password"
+            <PasswordInput
               name="confirmPassword"
               required
               value={formData.confirmPassword}

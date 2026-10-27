@@ -4,6 +4,12 @@ import { useToast } from '../context/ToastContext';
 
 export default function Contact() {
   const toast = useToast();
+  const whatsappNumber = (process.env.REACT_APP_WHATSAPP_NUMBER || '').replace(/[^0-9]/g, '');
+  const prefilledMessage = encodeURIComponent('Hi ArtisanLoft, I have a question about...');
+  const whatsappUrl = whatsappNumber
+    ? `https://wa.me/${whatsappNumber}?text=${prefilledMessage}`
+    : `https://wa.me/?text=${prefilledMessage}`;
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -57,8 +63,13 @@ export default function Contact() {
         <div className="max-w-7xl mx-auto px-8 flex items-center justify-center gap-4 text-white">
           <MessageCircle className="w-6 h-6" />
           <span className="font-medium">Quick Response on WhatsApp!</span>
-          <a href="https://wa.me/917760478724" className="bg-white text-green-600 px-4 py-2 rounded text-sm font-semibold hover:bg-green-50">
-            Chat Now
+          <a
+            href={whatsappUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-white text-green-600 px-4 py-2 rounded text-sm font-semibold hover:bg-green-50 transition-colors"
+          >
+            Chat on WhatsApp
           </a>
         </div>
       </section>

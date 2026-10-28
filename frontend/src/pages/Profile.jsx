@@ -238,7 +238,7 @@ export default function Profile() {
                         value={editForm.phone}
                         onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
                         className="w-full p-4 bg-stone-50 border border-stone-200 outline-none focus:border-stone-900"
-                        placeholder="+91 98765 43210"
+                        placeholder="Enter phone number"
                       />
                     </div>
                     <div>

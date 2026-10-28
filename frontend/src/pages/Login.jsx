@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import PasswordInput from '../components/PasswordInput';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -10,11 +11,14 @@ export default function Login() {
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const { login, isAuthenticated } = useAuth();
   const toast = useToast();
 
+  const from = location.state?.from?.pathname || (typeof location.state?.from === 'string' ? location.state.from : '/profile');
+
   if (isAuthenticated) {
-    navigate('/profile');
+    navigate(from);
     return null;
   }
 
@@ -33,9 +37,9 @@ export default function Login() {
     if (result.success) {
       setSuccess(true);
       if (toast?.success) {
-        toast.success('Welcome back! Redirecting to your profile...');
+        toast.success('Welcome back! Redirecting...');
       }
-      setTimeout(() => navigate('/profile'), 1000);
+      setTimeout(() => navigate(from), 1000);
     } else {
       setError(result.error || 'Failed to sign in. Please check your credentials.');
     }
@@ -58,7 +62,7 @@ export default function Login() {
               </svg>
             </div>
             <p className="text-lg font-serif text-stone-800">Welcome back!</p>
-            <p className="text-stone-500 text-sm mt-2">Redirecting to profile...</p>
+            <p className="text-stone-500 text-sm mt-2">Redirecting...</p>
           </div>
         ) : (
           <form className="space-y-6" onSubmit={handleSubmit}>
@@ -87,8 +91,7 @@ export default function Login() {
               <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
                 Password
               </label>
-              <input
-                type="password"
+              <PasswordInput
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

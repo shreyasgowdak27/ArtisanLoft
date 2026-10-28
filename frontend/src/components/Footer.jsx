@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Instagram, Facebook, Twitter, Mail, Phone, MapPin, Youtube } from 'lucide-react';
+import { Instagram, Facebook, Twitter, Mail, MapPin, Youtube } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
 export default function Footer() {
@@ -117,12 +117,8 @@ export default function Footer() {
                 <span>42, MG Road, Bangalore<br />Karnataka 560001</span>
               </li>
               <li className="flex items-center gap-3 text-stone-400">
-                <Phone className="w-5 h-5" />
-                <span>+91 80 4567 8900</span>
-              </li>
-              <li className="flex items-center gap-3 text-stone-400">
                 <Mail className="w-5 h-5" />
-                <span>care@artisanloft.in</span>
+                <span>{process.env.REACT_APP_CONTACT_EMAIL || 'care@artisanloft.in'}</span>
               </li>
             </ul>
             <div className="mt-6 p-4 bg-stone-800 rounded">

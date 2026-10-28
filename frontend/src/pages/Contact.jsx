@@ -1,38 +1,109 @@
 import React, { useState } from 'react';
-import { MapPin, Phone, Mail, Clock, Send, CheckCircle, MessageCircle } from 'lucide-react';
+import { MapPin, Mail, Clock, Send, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
+import { sendContactMessage } from '../api/api';
 
 export default function Contact() {
   const toast = useToast();
+  const contactEmail = process.env.REACT_APP_CONTACT_EMAIL || 'care@artisanloft.in';
+
   const [formData, setFormData] = useState({
     name: '',
     email: '',
-    phone: '',
-    city: '',
-    subject: '',
-    message: ''
+    message: '',
+    honeypot: '',
   });
+  const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    setSubmitted(true);
-    toast.success('Your message has been sent! We will get back to you within 24 hours.');
-  };
+  const [serverError, setServerError] = useState(null);
 
   const contactInfo = [
     { icon: MapPin, title: 'Head Office', lines: ['42, MG Road, Indiranagar', 'Bangalore, Karnataka 560038'] },
-    { icon: Phone, title: 'Call Us', lines: ['+91 80 4567 8900', 'Toll Free: 1800-123-4567'] },
-    { icon: Mail, title: 'Email Us', lines: ['care@artisanloft.in', 'orders@artisanloft.in'] },
+    { icon: Mail, title: 'Email Us', lines: [contactEmail, 'orders@artisanloft.in'] },
     { icon: Clock, title: 'Working Hours', lines: ['Mon-Sat: 10AM - 7PM IST', 'Sunday: 11AM - 5PM IST'] },
   ];
 
   const showrooms = [
-    { city: 'Bangalore', address: '42, MG Road, Indiranagar', phone: '+91 80 4567 8900' },
-    { city: 'Mumbai', address: 'Linking Road, Bandra West', phone: '+91 22 4567 8900' },
-    { city: 'Delhi NCR', address: 'DLF Cyber Hub, Gurugram', phone: '+91 124 456 7890' },
-    { city: 'Chennai', address: 'Nungambakkam High Road', phone: '+91 44 4567 8900' },
+    { city: 'Bangalore', address: '42, MG Road, Indiranagar' },
+    { city: 'Mumbai', address: 'Linking Road, Bandra West' },
+    { city: 'Delhi NCR', address: 'DLF Cyber Hub, Gurugram' },
+    { city: 'Chennai', address: 'Nungambakkam High Road' },
   ];
+
+  const validate = () => {
+    const nextErrors = {};
+    const trimmedName = formData.name.trim();
+    const trimmedEmail = formData.email.trim();
+    const trimmedMessage = formData.message.trim();
+
+    if (!trimmedName) {
+      nextErrors.name = 'Your name is required';
+    } else if (trimmedName.length > 100) {
+      nextErrors.name = 'Name must be 100 characters or less';
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!trimmedEmail) {
+      nextErrors.email = 'Email address is required';
+    } else if (!emailRegex.test(trimmedEmail)) {
+      nextErrors.email = 'Please enter a valid email address';
+    }
+
+    if (!trimmedMessage) {
+      nextErrors.message = 'Message is required';
+    } else if (trimmedMessage.length < 10) {
+      nextErrors.message = 'Message must be at least 10 characters long';
+    } else if (trimmedMessage.length > 1000) {
+      nextErrors.message = 'Message must be 1000 characters or less';
+    }
+
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setServerError(null);
+
+    if (!validate()) {
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      await sendContactMessage({
+        name: formData.name.trim(),
+        email: formData.email.trim(),
+        message: formData.message.trim(),
+        honeypot: formData.honeypot || undefined,
+      });
+
+      setSubmitted(true);
+      toast.success('Your message has been sent! We will get back to you within 24 hours.');
+    } catch (err) {
+      if (err.response?.status === 429) {
+        setServerError('You have reached the limit of 3 messages per hour. Please try again later.');
+        toast.error('Limit reached: 3 messages per hour.');
+      } else if (err.response?.status === 422) {
+        setServerError('Please ensure all fields are filled out with valid information.');
+        toast.error('Validation failed. Please check your inputs.');
+      } else {
+        setServerError(`Unable to deliver message right now. You can also reach us at ${contactEmail}.`);
+        toast.error('Failed to send message. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReset = () => {
+    setSubmitted(false);
+    setServerError(null);
+    setErrors({});
+    setFormData({ name: '', email: '', message: '', honeypot: '' });
+  };
 
   return (
     <main>
@@ -46,27 +117,20 @@ export default function Contact() {
               <span className="italic">Hear From You</span>
             </h1>
             <p className="text-stone-600 text-xl leading-relaxed">
-              Have questions about our collection? Need design advice for your home? Our team of experts is here to help you find the perfect furniture.
+              Have questions about our collection? Need design advice for your home? Reach out through our contact form or write to us at{' '}
+              <a href={`mailto:${contactEmail}`} className="text-stone-900 underline font-medium">
+                {contactEmail}
+              </a>
+              .
             </p>
           </div>
-        </div>
-      </section>
-
-      {/* WhatsApp CTA */}
-      <section className="bg-green-600 py-4">
-        <div className="max-w-7xl mx-auto px-8 flex items-center justify-center gap-4 text-white">
-          <MessageCircle className="w-6 h-6" />
-          <span className="font-medium">Quick Response on WhatsApp!</span>
-          <a href="https://wa.me/917760478724" className="bg-white text-green-600 px-4 py-2 rounded text-sm font-semibold hover:bg-green-50">
-            Chat Now
-          </a>
         </div>
       </section>
 
       {/* Contact Info Cards */}
       <section className="py-16">
         <div className="max-w-7xl mx-auto px-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {contactInfo.map((item, index) => (
               <div key={index} className="bg-white border border-stone-200 p-8 text-center">
                 <item.icon className="w-8 h-8 mx-auto mb-4 text-stone-700" />
@@ -80,14 +144,24 @@ export default function Contact() {
         </div>
       </section>
 
-      {/* Contact Form & Map */}
+      {/* Contact Form & Showrooms */}
       <section className="py-16">
         <div className="max-w-7xl mx-auto px-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-16">
             {/* Form */}
             <div>
               <h2 className="text-3xl font-serif mb-8">Send Us a Message</h2>
-              
+
+              {serverError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded mb-6 flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-600" />
+                  <div className="text-sm">
+                    <p className="font-semibold">Message delivery issue</p>
+                    <p>{serverError}</p>
+                  </div>
+                </div>
+              )}
+
               {submitted ? (
                 <div className="bg-green-50 border border-green-200 p-12 text-center">
                   <CheckCircle className="w-16 h-16 text-green-600 mx-auto mb-6" />
@@ -95,114 +169,121 @@ export default function Contact() {
                   <p className="text-stone-600 mb-6">
                     Thank you for reaching out. Our team will get back to you within 24 hours.
                   </p>
-                  <button 
-                    onClick={() => { setSubmitted(false); setFormData({ name: '', email: '', subject: '', message: '' }); }}
-                    className="text-stone-900 underline hover:no-underline"
+                  <button
+                    onClick={handleReset}
+                    className="text-stone-900 underline font-medium hover:no-underline"
                   >
                     Send another message
                   </button>
                 </div>
               ) : (
-                <form onSubmit={handleSubmit} className="space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
-                        Your Name *
-                      </label>
-                      <input 
-                        type="text"
-                        required
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        className="w-full p-4 bg-stone-50 border border-stone-200 outline-none focus:border-stone-900 transition-colors"
-                        placeholder="Rahul Sharma"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
-                        Phone Number *
-                      </label>
-                      <input 
-                        type="tel"
-                        required
-                        value={formData.phone}
-                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                        className="w-full p-4 bg-stone-50 border border-stone-200 outline-none focus:border-stone-900 transition-colors"
-                        placeholder="+91 98765 43210"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
-                        Email Address *
-                      </label>
-                      <input 
-                        type="email"
-                        required
-                        value={formData.email}
-                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                        className="w-full p-4 bg-stone-50 border border-stone-200 outline-none focus:border-stone-900 transition-colors"
-                        placeholder="rahul@example.com"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
-                        City *
-                      </label>
-                      <input 
-                        type="text"
-                        required
-                        value={formData.city}
-                        onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                        className="w-full p-4 bg-stone-50 border border-stone-200 outline-none focus:border-stone-900 transition-colors"
-                        placeholder="Bangalore"
-                      />
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
-                      Subject *
-                    </label>
-                    <select
-                      required
-                      value={formData.subject}
-                      onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
-                      className="w-full p-4 bg-stone-50 border border-stone-200 outline-none focus:border-stone-900 transition-colors"
-                    >
-                      <option value="">Select a subject</option>
-                      <option value="product">Product Inquiry</option>
-                      <option value="order">Order Support</option>
-                      <option value="design">Design Consultation</option>
-                      <option value="visit">Schedule Showroom Visit</option>
-                      <option value="custom">Custom/Bulk Order Request</option>
-                      <option value="franchise">Franchise Inquiry</option>
-                      <option value="other">Other</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
-                      Message *
-                    </label>
-                    <textarea 
-                      required
-                      rows={6}
-                      value={formData.message}
-                      onChange={(e) => setFormData({ ...formData, message: e.target.value })}
-                      className="w-full p-4 bg-stone-50 border border-stone-200 outline-none focus:border-stone-900 transition-colors resize-none"
-                      placeholder="Tell us how we can help..."
+                <form onSubmit={handleSubmit} noValidate className="space-y-6">
+                  {/* Hidden honeypot field to silently trap spam bots */}
+                  <div style={{ display: 'none' }} aria-hidden="true">
+                    <label htmlFor="contact-form-honeypot">Website</label>
+                    <input
+                      id="contact-form-honeypot"
+                      type="text"
+                      name="honeypot"
+                      tabIndex={-1}
+                      autoComplete="off"
+                      value={formData.honeypot}
+                      onChange={(e) => setFormData({ ...formData, honeypot: e.target.value })}
                     />
                   </div>
 
-                  <button 
+                  <div>
+                    <label htmlFor="contact-name" className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
+                      Your Name *
+                    </label>
+                    <input
+                      id="contact-name"
+                      type="text"
+                      disabled={loading}
+                      maxLength={100}
+                      value={formData.name}
+                      onChange={(e) => {
+                        setFormData({ ...formData, name: e.target.value });
+                        if (errors.name) setErrors({ ...errors, name: '' });
+                      }}
+                      className={`w-full p-4 bg-stone-50 border ${
+                        errors.name ? 'border-red-500 focus:border-red-600' : 'border-stone-200 focus:border-stone-900'
+                      } outline-none transition-colors disabled:opacity-60`}
+                      placeholder="Rahul Sharma"
+                    />
+                    {errors.name && (
+                      <p className="text-red-600 text-xs mt-1.5">{errors.name}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label htmlFor="contact-email" className="block text-xs uppercase tracking-widest font-bold text-stone-500 mb-2">
+                      Email Address *
+                    </label>
+                    <input
+                      id="contact-email"
+                      type="email"
+                      disabled={loading}
+                      value={formData.email}
+                      onChange={(e) => {
+                        setFormData({ ...formData, email: e.target.value });
+                        if (errors.email) setErrors({ ...errors, email: '' });
+                      }}
+                      className={`w-full p-4 bg-stone-50 border ${
+                        errors.email ? 'border-red-500 focus:border-red-600' : 'border-stone-200 focus:border-stone-900'
+                      } outline-none transition-colors disabled:opacity-60`}
+                      placeholder="rahul@example.com"
+                    />
+                    {errors.email && (
+                      <p className="text-red-600 text-xs mt-1.5">{errors.email}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-2">
+                      <label htmlFor="contact-message" className="block text-xs uppercase tracking-widest font-bold text-stone-500">
+                        Message *
+                      </label>
+                      <span className="text-xs text-stone-400">
+                        {formData.message.length}/1000
+                      </span>
+                    </div>
+                    <textarea
+                      id="contact-message"
+                      rows={6}
+                      disabled={loading}
+                      maxLength={1000}
+                      value={formData.message}
+                      onChange={(e) => {
+                        setFormData({ ...formData, message: e.target.value });
+                        if (errors.message) setErrors({ ...errors, message: '' });
+                      }}
+                      className={`w-full p-4 bg-stone-50 border ${
+                        errors.message ? 'border-red-500 focus:border-red-600' : 'border-stone-200 focus:border-stone-900'
+                      } outline-none transition-colors resize-none disabled:opacity-60`}
+                      placeholder="Tell us how we can help..."
+                    />
+                    {errors.message && (
+                      <p className="text-red-600 text-xs mt-1.5">{errors.message}</p>
+                    )}
+                  </div>
+
+                  <button
                     type="submit"
-                    className="w-full py-5 bg-stone-900 text-white font-semibold uppercase tracking-widest text-sm hover:bg-stone-800 transition-colors flex items-center justify-center gap-2"
+                    disabled={loading}
+                    className="w-full py-5 bg-stone-900 text-white font-semibold uppercase tracking-widest text-sm hover:bg-stone-800 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer disabled:cursor-not-allowed"
                   >
-                    <Send className="w-4 h-4" />
-                    Send Message
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" />
+                        Send Message
+                      </>
+                    )}
                   </button>
                 </form>
               )}
@@ -218,9 +299,8 @@ export default function Contact() {
                       <div>
                         <h3 className="font-serif text-lg mb-1">{showroom.city}</h3>
                         <p className="text-stone-600 text-sm">{showroom.address}</p>
-                        <p className="text-stone-500 text-sm mt-2">{showroom.phone}</p>
                       </div>
-                      <a 
+                      <a
                         href={`https://maps.google.com?q=${encodeURIComponent(showroom.address + ' ' + showroom.city)}`}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -232,11 +312,13 @@ export default function Contact() {
                   </div>
                 ))}
               </div>
-              
-              <div className="bg-orange-50 border border-orange-200 p-6 mt-6">
-                <h3 className="font-medium text-orange-800 mb-2">📞 Prefer talking to us?</h3>
-                <p className="text-orange-700 text-sm mb-3">Our furniture experts are available to help you choose the perfect pieces.</p>
-                <p className="font-semibold text-orange-900">Toll Free: 1800-123-4567</p>
+
+              <div className="bg-stone-50 border border-stone-200 p-6 mt-6">
+                <h3 className="font-medium text-stone-900 mb-2">Need quick assistance?</h3>
+                <p className="text-stone-600 text-sm mb-3">Our furniture specialists respond promptly to all email inquiries.</p>
+                <a href={`mailto:${contactEmail}`} className="font-medium text-stone-900 underline hover:no-underline text-sm">
+                  {contactEmail}
+                </a>
               </div>
             </div>
           </div>

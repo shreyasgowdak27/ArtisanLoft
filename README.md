@@ -1,4 +1,4 @@
-# ArtisanLoft: Professional Furniture E-commerce Application
+f# ArtisanLoft: Professional Furniture E-commerce Application
 
 ArtisanLoft is a modern, minimalist full-stack e-commerce application designed for high-end furniture retail. It features a clean, "artisan" aesthetic with a robust Spring Boot backend using Spring JDBC for efficient data handling and a React frontend built with Tailwind CSS.
 

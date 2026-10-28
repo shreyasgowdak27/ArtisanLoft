@@ -9,16 +9,19 @@ const api = axios.create({
   baseURL: `${BASE_URL}/api/v1`,
 });
 
-// Attach Supabase access token as Bearer header on API calls
+// Attach Supabase access token as Bearer header on API calls.
+// Race getSession() against a 2-second timeout so a slow or hung auth
+// check never blocks a public endpoint (e.g. /products) indefinitely.
 api.interceptors.request.use(async (config) => {
   try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    const timeout = new Promise((resolve) => setTimeout(resolve, 2000, null));
+    const result = await Promise.race([supabase.auth.getSession(), timeout]);
+    const session = result?.data?.session;
     if (session?.access_token) {
       config.headers.Authorization = `Bearer ${session.access_token}`;
     }
   } catch (err) {
+    // Non-fatal: proceed without auth header
     console.error('Failed to attach Supabase session token to request:', err);
   }
   return config;
@@ -26,7 +29,17 @@ api.interceptors.request.use(async (config) => {
 
 export const getProducts = () => api.get('/products');
 export const getProductById = (slug) => api.get(`/products/${slug}`);
-export const createOrder = (orderData) => api.post('/products/orders', orderData);
+export const createOrder = (orderData) => api.post('/orders', orderData);
+export const getOrders = () => api.get('/orders');
+export const getOrderById = (orderId) => api.get(`/orders/${orderId}`);
 export const getMe = () => api.get('/me');
+export const getCart = () => api.get('/cart');
+export const addToCartApi = (productId, quantity = 1) =>
+  api.post('/cart/items', { product_id: productId, quantity });
+export const updateCartItemApi = (productId, quantity) =>
+  api.patch(`/cart/items/${productId}`, { quantity });
+export const deleteCartItemApi = (productId) =>
+  api.delete(`/cart/items/${productId}`);
+export const sendContactMessage = (data) => api.post('/contact', data);
 
 export default api;

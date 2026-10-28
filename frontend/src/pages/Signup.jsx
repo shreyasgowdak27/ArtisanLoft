@@ -141,7 +141,7 @@ export default function Signup() {
               value={formData.phone}
               onChange={handleChange}
               className="w-full p-3 bg-stone-50 border border-stone-200 outline-none focus:border-stone-900 transition-colors"
-              placeholder="+91 98765 43210"
+              placeholder="Enter phone number"
               autoComplete="tel"
             />
           </div>

@@ -12,5 +12,5 @@ class Base(DeclarativeBase):
 
 
 # Import models so Alembic sees them during autogenerate.
-from app.models import cart, order, product  # noqa: E402, F401
+from app.models import cart, contact, order, product  # noqa: E402, F401
 

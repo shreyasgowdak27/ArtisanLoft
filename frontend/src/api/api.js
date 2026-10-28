@@ -40,5 +40,6 @@ export const updateCartItemApi = (productId, quantity) =>
   api.patch(`/cart/items/${productId}`, { quantity });
 export const deleteCartItemApi = (productId) =>
   api.delete(`/cart/items/${productId}`);
+export const sendContactMessage = (data) => api.post('/contact', data);
 
 export default api;

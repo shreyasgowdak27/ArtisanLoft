@@ -7,6 +7,4 @@ pydantic-settings
 python-dotenv
 alembic
 email-validator
-pytest
-httpx
 pyjwt[crypto]

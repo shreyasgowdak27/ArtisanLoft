@@ -48,10 +48,16 @@ class Settings(BaseSettings):
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
-    def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
+    def parse_cors_origins(cls, value: str | list[str] | None) -> list[str]:
+        if value is None:
+            return ["http://localhost:3000"]
         if isinstance(value, str):
-            return [o.strip() for o in value.split(",") if o.strip()]
-        return value
+            origins = [o.strip() for o in value.split(",") if o.strip()]
+            return origins if origins else ["http://localhost:3000"]
+        if isinstance(value, list):
+            origins = [str(o).strip() for o in value if str(o).strip()]
+            return origins if origins else ["http://localhost:3000"]
+        return ["http://localhost:3000"]
 
     @field_validator("DATABASE_URL", mode="after")
     @classmethod

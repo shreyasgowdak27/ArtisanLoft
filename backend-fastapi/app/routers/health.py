@@ -18,6 +18,7 @@ router = APIRouter(prefix="/health", tags=["health"])
 
 
 @router.get("")
+@router.get("/")
 async def liveness() -> dict[str, str]:
     """Liveness probe — always returns OK if the process is alive."""
     return {"status": "ok"}

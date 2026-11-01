@@ -1,0 +1,29 @@
+name: Backend FastAPI CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql+asyncpg://ci:ci@127.0.0.1:5432/artisanloft_ci
+      JWT_SECRET: ci-placeholder-not-a-secret
+      SUPABASE_URL: https://example.test
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install backend development requirements
+        run: python -m pip install -r backend-fastapi/requirements-dev.txt
+      - name: Run backend tests
+        working-directory: backend-fastapi
+        run: pytest

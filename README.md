@@ -1,5 +1,7 @@
 f# ArtisanLoft: Professional Furniture E-commerce Application
 
+[![Backend FastAPI CI](https://github.com/shreyasgowdak27/ArtisanLoft-Furniture/actions/workflows/backend-fastapi-ci.yml/badge.svg?branch=main)](https://github.com/shreyasgowdak27/ArtisanLoft-Furniture/actions/workflows/backend-fastapi-ci.yml)
+
 ArtisanLoft is a modern, minimalist full-stack e-commerce application designed for high-end furniture retail. It features a clean, "artisan" aesthetic with a robust Spring Boot backend using Spring JDBC for efficient data handling and a React frontend built with Tailwind CSS.
 
 ## Features

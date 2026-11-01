@@ -30,3 +30,7 @@ frontend/build/
 .windsurf/
 skills-lock.json
 .DS_Store
+
+# local documentation notes and reviews
+docs/INTERVIEW-GUIDE.md
+docs/reviews/

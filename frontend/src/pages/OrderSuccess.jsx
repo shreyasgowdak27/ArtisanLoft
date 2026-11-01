@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useParams, Link } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
-import { getOrderById } from '../api/api';
+import { getOrderById, payOrder } from '../api/api';
 import { formatPrice } from '../utils/currency';
 import {
   CheckCircle,
@@ -13,6 +13,7 @@ import {
   AlertCircle,
   Copy,
   Check,
+  Loader2,
 } from 'lucide-react';
 
 export default function OrderSuccess() {
@@ -24,6 +25,9 @@ export default function OrderSuccess() {
   const [loading, setLoading] = useState(!location.state?.order && Boolean(orderId));
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [paymentError, setPaymentError] = useState(null);
+  const receiptOrigin = location.state?.receiptOrigin || 'history';
 
   // Clear cart context and navbar count badge on mount
   useEffect(() => {
@@ -55,6 +59,26 @@ export default function OrderSuccess() {
       navigator.clipboard.writeText(order.id);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handlePayNow = async () => {
+    if (!order?.id || paying) return;
+
+    setPaying(true);
+    setPaymentError(null);
+    try {
+      const response = await payOrder(order.id);
+      setOrder(response.data);
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      setPaymentError(
+        typeof detail === 'string'
+          ? detail
+          : 'Unable to complete the demo payment. Please try again.'
+      );
+    } finally {
+      setPaying(false);
     }
   };
 
@@ -110,6 +134,8 @@ export default function OrderSuccess() {
 
   const items = order.items || [];
   const totalRupees = order.total_cents ? order.total_cents / 100 : 0;
+  const isPaid = order.status?.toLowerCase() === 'paid';
+  const isCheckoutReceipt = receiptOrigin === 'checkout';
   const formattedDate = order.created_at
     ? new Date(order.created_at).toLocaleDateString('en-IN', {
         day: 'numeric',
@@ -122,17 +148,29 @@ export default function OrderSuccess() {
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
       {/* Header Banner */}
       <div className="text-center mb-12">
-        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 text-green-700">
-          <CheckCircle className="w-9 h-9" />
+        <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
+          isPaid ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+        }`}>
+          {isPaid ? <CheckCircle className="w-9 h-9" /> : <AlertCircle className="w-9 h-9" />}
         </div>
-        <span className="text-xs uppercase tracking-widest font-semibold text-green-700 bg-green-50 px-3 py-1 rounded-full">
-          Order Confirmed
-        </span>
+        {isPaid ? (
+          isCheckoutReceipt && (
+            <span className="text-xs uppercase tracking-widest font-semibold text-green-700 bg-green-50 px-3 py-1 rounded-full">
+              Order Confirmed
+            </span>
+          )
+        ) : (
+          <span className="text-xs uppercase tracking-widest font-semibold text-amber-800 bg-amber-50 px-3 py-1 rounded-full">
+            Payment Pending
+          </span>
+        )}
         <h1 className="text-3xl md:text-4xl font-serif mt-3 mb-2 text-stone-900">
-          Thank you for your order!
+          {isPaid && isCheckoutReceipt ? 'Thank you for your order!' : isPaid ? 'Order receipt' : 'Payment pending'}
         </h1>
         <p className="text-stone-500 max-w-md mx-auto text-sm">
-          We have received your order. Our master artisans will prepare your handcrafted pieces with utmost care.
+          {isPaid
+            ? 'Your order is confirmed. Our master artisans will prepare your handcrafted pieces with utmost care.'
+            : 'Review the amount due, then use the demo payment to confirm your order.'}
         </p>
       </div>
 
@@ -160,7 +198,9 @@ export default function OrderSuccess() {
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs uppercase font-semibold px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full">
+            <span className={`text-xs uppercase font-semibold px-2.5 py-1 rounded-full ${
+              isPaid ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'
+            }`}>
               Status: {order.status}
             </span>
           </div>
@@ -227,11 +267,28 @@ export default function OrderSuccess() {
             <span className="text-green-700 font-medium">FREE</span>
           </div>
           <div className="flex justify-between items-baseline pt-2 border-t border-stone-200">
-            <span className="text-base font-serif text-stone-900">Total Paid</span>
+            <span className="text-base font-serif text-stone-900">{isPaid ? 'Total Paid' : 'Total Due'}</span>
             <span className="text-2xl font-bold text-stone-900">{formatPrice(totalRupees)}</span>
           </div>
         </div>
       </div>
+
+      {!isPaid && (
+        <div className="mt-6 bg-amber-50 border border-amber-200 rounded-lg p-5 text-center">
+          <p className="text-sm font-semibold text-amber-900">Demo payment, no real money is charged.</p>
+          <p className="mt-1 text-sm text-amber-800">No card details are collected.</p>
+          {paymentError && <p role="alert" className="mt-3 text-sm text-red-700">{paymentError}</p>}
+          <button
+            type="button"
+            onClick={handlePayNow}
+            disabled={paying}
+            className="mt-4 inline-flex min-h-11 items-center justify-center gap-2 px-8 py-3 bg-stone-900 text-white font-semibold uppercase tracking-widest text-xs hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60 transition rounded-sm"
+          >
+            {paying && <Loader2 className="w-4 h-4 animate-spin" />}
+            <span>{paying ? 'Processing payment' : 'Pay now'}</span>
+          </button>
+        </div>
+      )}
 
       {/* Action Buttons */}
       <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">

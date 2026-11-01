@@ -187,7 +187,7 @@ export default function OrderCard({ order }) {
         </span>
         <Link
           to={`/order-success/${order.id}`}
-          state={{ order }}
+          state={{ order, receiptOrigin: 'history' }}
           className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-800 hover:text-stone-950 hover:underline transition"
         >
           <span>View Details &amp; Receipt</span>

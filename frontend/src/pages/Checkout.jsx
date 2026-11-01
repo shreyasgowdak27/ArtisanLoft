@@ -140,9 +140,10 @@ export default function Checkout() {
       // Immediately clear cart context and navbar count badge
       clearCart();
 
-      toast.success('Order placed successfully!');
-      // Navigate to order confirmation page with order data
-      navigate(`/order-success/${createdOrder.id}`, { state: { order: createdOrder } });
+      toast.success('Order placed. Complete the demo payment to confirm it.');
+      navigate(`/order-success/${createdOrder.id}`, {
+        state: { order: createdOrder, receiptOrigin: 'checkout' },
+      });
     } catch (err) {
       console.error('Order creation failed:', err);
       // Extract exact backend error detail (e.g. 400 over-stock message).

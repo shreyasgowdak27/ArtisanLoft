@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -184,3 +184,51 @@ async def get_order(db: AsyncSession, user_id: str, order_id: uuid.UUID) -> Orde
             detail="Order not found",
         )
     return OrderRead.model_validate(order)
+
+
+async def pay_order(db: AsyncSession, user_id: str, order_id: uuid.UUID) -> OrderRead:
+    """Marks one owned pending order as paid for the demo payment flow.
+
+    The conditional UPDATE is the state transition. Its WHERE clause makes the
+    transition owner scoped and atomic, so concurrent clicks cannot both change
+    the same order. A second request sees the paid order and returns it.
+    """
+    owner_id = _user_uuid(user_id)
+    transition = (
+        update(Order)
+        .where(
+            Order.id == order_id,
+            Order.user_id == owner_id,
+            Order.status == "pending",
+        )
+        .values(status="paid")
+        .returning(Order.id)
+    )
+    transition_result = await db.execute(transition)
+
+    if transition_result.scalar_one_or_none() is not None:
+        await db.commit()
+        return await get_order(db, user_id, order_id)
+
+    existing_order = await db.scalar(
+        select(Order)
+        .options(selectinload(Order.items))
+        .where(Order.id == order_id, Order.user_id == owner_id)
+    )
+    existing_order_read = (
+        OrderRead.model_validate(existing_order) if existing_order is not None else None
+    )
+    await db.rollback()
+
+    if existing_order_read is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+    if existing_order_read.status == "paid":
+        return existing_order_read
+
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=f"Order cannot be paid while status is '{existing_order_read.status}'",
+    )

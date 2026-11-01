@@ -32,6 +32,7 @@ export const getProductById = (slug) => api.get(`/products/${slug}`);
 export const createOrder = (orderData) => api.post('/orders', orderData);
 export const getOrders = () => api.get('/orders');
 export const getOrderById = (orderId) => api.get(`/orders/${orderId}`);
+export const payOrder = (orderId) => api.post(`/orders/${orderId}/pay`);
 export const getMe = () => api.get('/me');
 export const getCart = () => api.get('/cart');
 export const addToCartApi = (productId, quantity = 1) =>

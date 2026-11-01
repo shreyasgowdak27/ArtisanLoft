@@ -6,9 +6,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException, status
+from sqlalchemy import text
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
+from app.db.session import engine
 from app.models.cart import CartItem
 from app.models.order import Order, OrderItem
 from app.models.product import Product
@@ -71,6 +75,24 @@ def sample_order(user_id: str = USER_A) -> OrderRead:
     )
 
 
+def sample_order_model(user_id: str = USER_A, order_status: str = "pending") -> Order:
+    return Order(
+        id=ORDER_ID,
+        user_id=uuid.UUID(user_id),
+        status=order_status,
+        total_cents=5999800,
+        shipping_name="Shreyas Gowda",
+        shipping_line1="12 MG Road",
+        shipping_line2="Apt 4B",
+        shipping_city="Bengaluru",
+        shipping_state="Karnataka",
+        shipping_pincode="560001",
+        shipping_country="IN",
+        created_at=datetime.now(timezone.utc),
+        items=[],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Auth requirements (AC-7)
 # ---------------------------------------------------------------------------
@@ -81,6 +103,7 @@ def test_order_routes_require_login(client):
     responses = [
         client.post("/api/v1/orders", json=VALID_SHIPPING_PAYLOAD),
         client.get("/api/v1/orders"),
+        client.post(f"/api/v1/orders/{ORDER_ID}/pay"),
         client.get(f"/api/v1/orders/{ORDER_ID}"),
     ]
     assert all(r.status_code == status.HTTP_401_UNAUTHORIZED for r in responses)
@@ -378,6 +401,170 @@ async def test_order_service_get_order_checks_ownership():
 
     assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
     assert exc_info.value.detail == "Order not found"
+
+
+# ---------------------------------------------------------------------------
+# Mock payment service tests (spec 0003)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_pay_order_transitions_owned_pending_order_atomically():
+    """AC-1 and AC-2: one conditional update pays the caller's pending order."""
+    db = AsyncMock()
+    update_result = MagicMock()
+    update_result.scalar_one_or_none.return_value = ORDER_ID
+    db.execute.return_value = update_result
+    db.scalar.return_value = sample_order_model(order_status="paid")
+
+    paid_order = await order_service.pay_order(db, USER_A, ORDER_ID)
+
+    statement = db.execute.await_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+    assert "UPDATE orders SET status=" in sql
+    assert "orders.id" in sql
+    assert "orders.user_id" in sql
+    assert "orders.status" in sql
+    assert "pending" in compiled.params.values()
+    assert paid_order.status == "paid"
+    db.commit.assert_awaited_once()
+    db.rollback.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_pay_order_retry_on_paid_order_returns_paid_order():
+    """AC-3: a retry cannot transition twice and still returns the paid order."""
+    db = AsyncMock()
+    update_result = MagicMock()
+    update_result.scalar_one_or_none.return_value = None
+    db.execute.return_value = update_result
+    db.scalar.return_value = sample_order_model(order_status="paid")
+
+    paid_order = await order_service.pay_order(db, USER_A, ORDER_ID)
+
+    assert paid_order.status == "paid"
+    db.commit.assert_not_awaited()
+    db.rollback.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_pay_order_for_another_users_order_returns_404():
+    """AC-4: another user's order is indistinguishable from a missing order."""
+    db = AsyncMock()
+    update_result = MagicMock()
+    update_result.scalar_one_or_none.return_value = None
+    db.execute.return_value = update_result
+    db.scalar.return_value = None
+
+    with pytest.raises(HTTPException) as exc_info:
+        await order_service.pay_order(db, USER_A, ORDER_ID)
+
+    assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+    assert exc_info.value.detail == "Order not found"
+    db.rollback.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_pay_order_for_cancelled_order_returns_409():
+    """AC-4: cancelled orders cannot be paid by the demo flow."""
+    db = AsyncMock()
+    update_result = MagicMock()
+    update_result.scalar_one_or_none.return_value = None
+    db.execute.return_value = update_result
+    db.scalar.return_value = sample_order_model(order_status="cancelled")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await order_service.pay_order(db, USER_A, ORDER_ID)
+
+    assert exc_info.value.status_code == status.HTTP_409_CONFLICT
+    assert "cancelled" in exc_info.value.detail
+    db.rollback.assert_awaited_once()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("order_status", "expected_status_code"),
+    [("paid", None), ("cancelled", status.HTTP_409_CONFLICT)],
+)
+async def test_pay_order_handles_expired_order_after_rollback_with_real_async_session(
+    order_status, expected_status_code
+):
+    """Regression: rollback expires loaded ORM state before payment result handling."""
+    connection = None
+    try:
+        connection = await engine.connect()
+    except (OSError, SQLAlchemyError) as error:
+        pytest.skip(f"Postgres is unavailable for this async session regression test: {error}")
+
+    try:
+        await connection.execute(
+            text(
+                """
+                CREATE TEMPORARY TABLE orders (
+                    id UUID PRIMARY KEY,
+                    user_id UUID NOT NULL,
+                    status VARCHAR(20) NOT NULL,
+                    total_cents BIGINT NOT NULL,
+                    shipping_name VARCHAR(255) NOT NULL,
+                    shipping_line1 VARCHAR(255) NOT NULL,
+                    shipping_line2 VARCHAR(255),
+                    shipping_city VARCHAR(100) NOT NULL,
+                    shipping_state VARCHAR(100) NOT NULL,
+                    shipping_pincode VARCHAR(20) NOT NULL,
+                    shipping_country VARCHAR(2) NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL
+                ) ON COMMIT PRESERVE ROWS
+                """
+            )
+        )
+        await connection.execute(
+            text(
+                """
+                CREATE TEMPORARY TABLE order_items (
+                    id UUID PRIMARY KEY,
+                    order_id UUID NOT NULL,
+                    product_id UUID NOT NULL,
+                    product_name VARCHAR(255) NOT NULL,
+                    unit_price_cents BIGINT NOT NULL,
+                    quantity INTEGER NOT NULL,
+                    line_total_cents BIGINT NOT NULL
+                ) ON COMMIT PRESERVE ROWS
+                """
+            )
+        )
+        await connection.commit()
+
+        async with AsyncSession(bind=connection, expire_on_commit=False) as db:
+            order = sample_order_model(order_status=order_status)
+            order.items = [
+                OrderItem(
+                    id=uuid.uuid4(),
+                    order_id=ORDER_ID,
+                    product_id=PRODUCT_A_ID,
+                    product_name="Oak Dining Table",
+                    unit_price_cents=2999900,
+                    quantity=2,
+                    line_total_cents=5999800,
+                )
+            ]
+            db.add(order)
+            await db.commit()
+
+            if expected_status_code is None:
+                paid_order = await order_service.pay_order(db, USER_A, ORDER_ID)
+                assert paid_order.status == "paid"
+                assert len(paid_order.items) == 1
+            else:
+                with pytest.raises(HTTPException) as exc_info:
+                    await order_service.pay_order(db, USER_A, ORDER_ID)
+
+                assert exc_info.value.status_code == expected_status_code
+                assert "cancelled" in exc_info.value.detail
+    finally:
+        if connection is not None:
+            await connection.close()
+        await engine.dispose()
 
 
 # ---------------------------------------------------------------------------

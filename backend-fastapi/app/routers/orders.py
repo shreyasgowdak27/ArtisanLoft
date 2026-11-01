@@ -30,6 +30,15 @@ async def list_orders(
     return await order_service.list_orders(db, current_user.id)
 
 
+@router.post("/{order_id}/pay", response_model=OrderRead)
+async def pay_order(
+    order_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> OrderRead:
+    return await order_service.pay_order(db, current_user.id, order_id)
+
+
 @router.get("/{order_id}", response_model=OrderRead)
 async def get_order(
     order_id: uuid.UUID,

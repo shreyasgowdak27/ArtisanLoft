@@ -14,6 +14,7 @@ import ProductDetail from './pages/ProductDetail';
 import Cart from './pages/Cart';
 import Collection from './pages/Collection';
 import Profile from './pages/Profile';
+import OrderHistory from './pages/OrderHistory';
 import Checkout from './pages/Checkout';
 import OrderSuccess from './pages/OrderSuccess';
 import About from './pages/About';
@@ -84,6 +85,14 @@ function App() {
                     element={
                       <ProtectedRoute>
                         <OrderSuccess />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/orders"
+                    element={
+                      <ProtectedRoute>
+                        <OrderHistory />
                       </ProtectedRoute>
                     }
                   />

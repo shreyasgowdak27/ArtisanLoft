@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { useToast } from '../context/ToastContext';
-import { formatPrice } from '../utils/currency';
-import { getMe } from '../api/api';
+import { getMe, getOrders } from '../api/api';
+import OrderCard from '../components/OrderCard';
 import {
   User,
   Package,
@@ -16,6 +16,7 @@ import {
   X,
   RefreshCw,
   AlertCircle,
+  ShoppingBag,
 } from 'lucide-react';
 
 export default function Profile() {
@@ -32,6 +33,10 @@ export default function Profile() {
   const [loadingMe, setLoadingMe] = useState(false);
   const [errorMe, setErrorMe] = useState(null);
 
+  const [orders, setOrders] = useState([]);
+  const [loadingOrders, setLoadingOrders] = useState(true);
+  const [errorOrders, setErrorOrders] = useState(null);
+
   const fetchUserProfile = async () => {
     setLoadingMe(true);
     setErrorMe(null);
@@ -46,9 +51,29 @@ export default function Profile() {
     }
   };
 
+  const fetchOrders = async () => {
+    setLoadingOrders(true);
+    setErrorOrders(null);
+    try {
+      const response = await getOrders();
+      setOrders(response.data || []);
+    } catch (err) {
+      console.error('Failed to fetch orders in profile:', err);
+      const detail = err.response?.data?.detail;
+      setErrorOrders(
+        typeof detail === 'string'
+          ? detail
+          : 'Unable to load your orders. Please try again.'
+      );
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
   useEffect(() => {
     if (isAuthenticated) {
       fetchUserProfile();
+      fetchOrders();
     }
   }, [isAuthenticated]);
 
@@ -61,19 +86,7 @@ export default function Profile() {
   }
 
   if (!isAuthenticated) {
-    return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center px-8">
-        <User className="w-16 h-16 text-stone-300 mb-6" />
-        <h2 className="text-2xl font-serif mb-4">Please Sign In</h2>
-        <p className="text-stone-500 mb-8">Access your profile, orders, and wishlist</p>
-        <button
-          onClick={() => navigate('/login')}
-          className="px-8 py-4 bg-stone-900 text-white font-semibold uppercase tracking-widest text-sm hover:bg-stone-800 transition-colors"
-        >
-          Sign In
-        </button>
-      </div>
-    );
+    return <Navigate to="/login" replace />;
   }
 
   const handleEdit = () => {
@@ -111,12 +124,6 @@ export default function Profile() {
     }
     navigate('/');
   };
-
-  const mockOrders = [
-    { id: 'ART-2024-001', date: '15 Feb 2024', status: 'Delivered', total: 89999, items: 1, product: 'Sheesham 3-Seater Sofa' },
-    { id: 'ART-2024-002', date: '10 Feb 2024', status: 'Shipped', total: 45999, items: 2, product: 'Makrana Marble Coffee Table' },
-    { id: 'ART-2024-003', date: '28 Jan 2024', status: 'Delivered', total: 125999, items: 1, product: 'Teak Wood Dining Set' },
-  ];
 
   const tabs = [
     { id: 'profile', label: 'Profile', icon: User },
@@ -305,7 +312,7 @@ export default function Profile() {
               {/* Quick Stats */}
               <div className="grid grid-cols-3 gap-6 mt-8">
                 <div className="bg-stone-50 p-6 text-center">
-                  <p className="text-3xl font-serif mb-1">{mockOrders.length}</p>
+                  <p className="text-3xl font-serif mb-1">{orders.length}</p>
                   <p className="text-stone-500 text-sm">Total Orders</p>
                 </div>
                 <div className="bg-stone-50 p-6 text-center">
@@ -322,37 +329,79 @@ export default function Profile() {
 
           {activeTab === 'orders' && (
             <div>
-              <h1 className="text-3xl font-serif mb-8">Order History</h1>
-              <div className="space-y-4">
-                {mockOrders.map((order) => (
-                  <div key={order.id} className="bg-white border border-stone-200 p-6">
-                    <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <p className="font-medium">{order.id}</p>
-                        <p className="text-stone-500 text-sm">{order.date}</p>
-                        <p className="text-stone-600 text-sm mt-1">{order.product}</p>
-                      </div>
-                      <span className={`px-3 py-1 text-xs uppercase tracking-wider ${
-                        order.status === 'Delivered'
-                          ? 'bg-green-100 text-green-800'
-                          : order.status === 'Shipped'
-                          ? 'bg-blue-100 text-blue-800'
-                          : 'bg-yellow-100 text-yellow-800'
-                      }`}>
-                        {order.status}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center pt-4 border-t border-stone-100">
-                      <p className="text-stone-500 text-sm">{order.items} item(s)</p>
-                      <p className="font-semibold text-lg">{formatPrice(order.total)}</p>
-                    </div>
-                    <div className="flex gap-4 mt-4">
-                      <button className="text-sm text-stone-600 hover:text-stone-900">Track Order</button>
-                      <button className="text-sm text-stone-600 hover:text-stone-900">Download Invoice</button>
-                    </div>
-                  </div>
-                ))}
+              <div className="flex items-center justify-between mb-8">
+                <h1 className="text-3xl font-serif">Order History</h1>
+                {!loadingOrders && !errorOrders && orders.length > 0 && (
+                  <span className="text-sm text-stone-500">
+                    {orders.length} {orders.length === 1 ? 'order' : 'orders'} placed
+                  </span>
+                )}
               </div>
+
+              {loadingOrders && (
+                <div className="space-y-4">
+                  {[1, 2].map((n) => (
+                    <div
+                      key={n}
+                      className="bg-white border border-stone-200 rounded-lg p-6 space-y-4 animate-pulse"
+                    >
+                      <div className="h-4 w-48 bg-stone-200 rounded" />
+                      <div className="h-4 w-3/4 bg-stone-100 rounded" />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!loadingOrders && errorOrders && (
+                <div className="bg-white border border-red-200 rounded-lg p-8 text-center shadow-sm">
+                  <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-4 text-red-600">
+                    <AlertCircle className="w-6 h-6" />
+                  </div>
+                  <h2 className="text-lg font-semibold text-stone-900 mb-1">
+                    Failed to Load Orders
+                  </h2>
+                  <p className="text-sm text-stone-600 mb-6 max-w-md mx-auto">
+                    {errorOrders}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={fetchOrders}
+                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-stone-900 text-white text-xs font-semibold uppercase tracking-wider rounded-sm hover:bg-stone-800 transition"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Try Again</span>
+                  </button>
+                </div>
+              )}
+
+              {!loadingOrders && !errorOrders && orders.length === 0 && (
+                <div className="bg-white border border-stone-200 rounded-lg p-12 text-center shadow-sm">
+                  <div className="w-16 h-16 rounded-full bg-stone-100 flex items-center justify-center mx-auto mb-4 text-stone-400">
+                    <Package className="w-8 h-8" />
+                  </div>
+                  <h2 className="text-xl font-serif text-stone-900 mb-2">
+                    No orders placed yet
+                  </h2>
+                  <p className="text-sm text-stone-500 mb-8 max-w-md mx-auto">
+                    When you purchase our handcrafted dining tables, chairs, and living room pieces, they will appear here.
+                  </p>
+                  <Link
+                    to="/collection"
+                    className="inline-flex items-center gap-2 px-8 py-3.5 bg-stone-900 text-white text-xs font-semibold uppercase tracking-widest rounded-sm hover:bg-stone-800 transition shadow-sm"
+                  >
+                    <ShoppingBag className="w-4 h-4" />
+                    <span>Browse Furniture Collection</span>
+                  </Link>
+                </div>
+              )}
+
+              {!loadingOrders && !errorOrders && orders.length > 0 && (
+                <div className="space-y-6">
+                  {orders.map((order) => (
+                    <OrderCard key={order.id} order={order} />
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

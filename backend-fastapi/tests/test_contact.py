@@ -5,9 +5,10 @@ from datetime import datetime, timezone
 
 import pytest
 from fastapi import status
+from unittest.mock import AsyncMock
 
 from app.core.deps import get_db
-from app.services.contact_service import rate_limiter
+from app.core.rate_limit import rate_limiter
 
 
 class MockAsyncSession:
@@ -159,6 +160,7 @@ def test_contact_rate_limit(contact_client, mock_db):
     res_blocked = contact_client.post("/api/v1/contact", json=payload, headers=headers_ip1)
     assert res_blocked.status_code == status.HTTP_429_TOO_MANY_REQUESTS
     assert "Too many messages sent" in res_blocked.json()["detail"]
+    assert int(res_blocked.headers["Retry-After"]) >= 1
     assert len(mock_db.added) == 3
 
     # Different IP can still submit
@@ -168,10 +170,35 @@ def test_contact_rate_limit(contact_client, mock_db):
     assert len(mock_db.added) == 4
 
 
+def test_contact_redis_rate_limit_uses_shared_counter(contact_client, mock_db, monkeypatch):
+    """A Redis count over the policy limit returns 429 with Retry After."""
+    redis_client = AsyncMock()
+    redis_client.eval.side_effect = [[1, 120], [4, 120]]
+    monkeypatch.setattr(rate_limiter, "_redis_url", "rediss://example.test:6379")
+    monkeypatch.setattr(rate_limiter, "_redis_client", redis_client)
+
+    payload = {
+        "name": "Jane Doe",
+        "email": "jane@example.com",
+        "message": "Inquiring about delivery schedule for order.",
+    }
+    headers = {"X-Forwarded-For": "198.51.100.10"}
+
+    allowed = contact_client.post("/api/v1/contact", json=payload, headers=headers)
+    blocked = contact_client.post("/api/v1/contact", json=payload, headers=headers)
+
+    assert allowed.status_code == status.HTTP_201_CREATED
+    assert blocked.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert blocked.headers["Retry-After"] == "120"
+    assert len(mock_db.added) == 1
+    assert redis_client.eval.await_count == 2
+    assert redis_client.eval.await_args.args[2] == "rate_limit:contact:198.51.100.10"
+
+
 def test_get_client_ip_reads_first_forwarded_for_value():
     """Client IP extraction prefers first X-Forwarded-For value and falls back to client.host."""
     from unittest.mock import MagicMock
-    from app.routers.contact import get_client_ip
+    from app.core.rate_limit import get_client_ip
 
     # Multiple proxies in X-Forwarded-For: client, proxy1, proxy2
     req_proxy = MagicMock()

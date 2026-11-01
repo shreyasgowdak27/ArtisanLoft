@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
 
+    # Optional locally. Production uses this Upstash rediss:// connection URL.
+    REDIS_URL: str = ""
+
     @property
     def supabase_jwks_url(self) -> str:
         base = self.SUPABASE_URL.strip().rstrip("/")

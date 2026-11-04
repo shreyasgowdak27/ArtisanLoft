@@ -6,7 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
-from app.core.rate_limit import WRITE_POLICY, get_client_ip, rate_limiter
+from app.core.rate_limit import (
+    WRITE_POLICY,
+    enforce_read_rate_limit,
+    get_client_ip,
+    rate_limiter,
+)
 from app.schemas.order import OrderCreate, OrderRead
 from app.schemas.user import CurrentUser
 from app.services import order_service
@@ -36,7 +41,11 @@ async def create_order(
     return await order_service.create_order(db, current_user.id, payload)
 
 
-@router.get("", response_model=list[OrderRead])
+@router.get(
+    "",
+    response_model=list[OrderRead],
+    dependencies=[Depends(enforce_read_rate_limit)],
+)
 async def list_orders(
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -55,7 +64,11 @@ async def pay_order(
     return await order_service.pay_order(db, current_user.id, order_id)
 
 
-@router.get("/{order_id}", response_model=OrderRead)
+@router.get(
+    "/{order_id}",
+    response_model=OrderRead,
+    dependencies=[Depends(enforce_read_rate_limit)],
+)
 async def get_order(
     order_id: uuid.UUID,
     current_user: CurrentUser = Depends(get_current_user),

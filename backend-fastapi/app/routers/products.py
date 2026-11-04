@@ -10,13 +10,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_db
+from app.core.rate_limit import enforce_read_rate_limit
 from app.models.product import Product
 from app.schemas.product import ProductRead
 
 router = APIRouter(prefix="/api/v1/products", tags=["products"])
 
 
-@router.get("", response_model=list[ProductRead])
+@router.get(
+    "",
+    response_model=list[ProductRead],
+    dependencies=[Depends(enforce_read_rate_limit)],
+)
 async def list_products(
     db: AsyncSession = Depends(get_db),
 ) -> list[Product]:
@@ -25,8 +30,15 @@ async def list_products(
     return list(result.scalars().all())
 
 
-@router.get("/{slug}", response_model=ProductRead)
-async def get_product(slug: str, db: AsyncSession = Depends(get_db)) -> Product:
+@router.get(
+    "/{slug}",
+    response_model=ProductRead,
+    dependencies=[Depends(enforce_read_rate_limit)],
+)
+async def get_product(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+) -> Product:
     """Fetch a single product by its URL slug."""
     result = await db.execute(select(Product).where(Product.slug == slug))
     product = result.scalar_one_or_none()

@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import jwt
@@ -184,8 +185,29 @@ def write_client(client, monkeypatch):
         email="write-rate@artisanloft.in",
     )
 
+    fake_product = SimpleNamespace(
+        id=uuid.UUID("3fa85f64-5717-4562-b3fc-2c963f66afa6"),
+        name="Oak Table",
+        slug="oak-table",
+        description=None,
+        price_cents=2999900,
+        currency="INR",
+        category="tables",
+        image_url=None,
+        image_urls=None,
+        stock=8,
+        is_active=True,
+    )
+    product_result = MagicMock()
+    product_result.scalars.return_value.all.return_value = [fake_product]
+    product_result.scalar_one_or_none.return_value = fake_product
+
+    class FakeDatabase:
+        async def execute(self, *_args, **_kwargs):
+            return product_result
+
     async def override_db():
-        yield object()
+        yield FakeDatabase()
 
     client.app.dependency_overrides[get_db] = override_db
 
@@ -358,4 +380,82 @@ def test_order_create_and_pay_share_write_bucket(write_client):
     # 31st request on either endpoint is blocked
     blocked = write_client.post("/api/v1/orders", json=payload, headers=headers)
     assert blocked.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+# ---------------------------------------------------------------------------
+# Shared read route rate limit tests (chunk 4 coverage, AC-4 and AC-5)
+# ---------------------------------------------------------------------------
+
+
+def test_product_cart_and_order_reads_share_limit_and_121st_returns_429(write_client):
+    """All read routes share 120 requests per IP and return Retry After on request 121."""
+    headers = {"X-Forwarded-For": "203.0.113.75"}
+
+    for path in ("/api/v1/products", "/api/v1/cart", "/api/v1/orders"):
+        for i in range(40):
+            response = write_client.get(path, headers=headers)
+            assert response.status_code == status.HTTP_200_OK, (
+                f"Read {i + 1} for {path} was unexpectedly blocked"
+            )
+
+    blocked = write_client.get("/api/v1/products/oak-table", headers=headers)
+    assert blocked.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert int(blocked.headers["Retry-After"]) >= 1
+
+
+def test_read_and_write_buckets_do_not_drain_each_other(write_client):
+    """Read requests use a different bucket from cart and order mutations."""
+    headers = {"X-Forwarded-For": "203.0.113.76"}
+    cart_payload = {"product_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6", "quantity": 1}
+
+    for _ in range(120):
+        assert write_client.get("/api/v1/products", headers=headers).status_code == status.HTTP_200_OK
+
+    write_after_read_limit = write_client.post(
+        "/api/v1/cart/items", json=cart_payload, headers=headers
+    )
+    assert write_after_read_limit.status_code == status.HTTP_200_OK
+
+    rate_limiter.reset()
+
+    for _ in range(30):
+        assert (
+            write_client.post("/api/v1/cart/items", json=cart_payload, headers=headers).status_code
+            == status.HTTP_200_OK
+        )
+
+    read_after_write_limit = write_client.get("/api/v1/products", headers=headers)
+    assert read_after_write_limit.status_code == status.HTTP_200_OK
+
+
+def test_health_and_options_requests_are_never_limited(write_client):
+    """Health probes and browser CORS preflight requests do not consume a limiter bucket."""
+    headers = {"X-Forwarded-For": "203.0.113.77"}
+
+    for _ in range(121):
+        assert write_client.get("/health", headers=headers).status_code == status.HTTP_200_OK
+
+    preflight_headers = {
+        **headers,
+        "Origin": "http://localhost:3000",
+        "Access-Control-Request-Method": "GET",
+    }
+    for _ in range(121):
+        response = write_client.options("/api/v1/products", headers=preflight_headers)
+        assert response.status_code != status.HTTP_429_TOO_MANY_REQUESTS
+
+
+def test_unauthenticated_cart_reads_are_limited_before_authentication(client):
+    """The read limiter rejects the 121st unauthenticated cart request before auth runs."""
+    headers = {"X-Forwarded-For": "203.0.113.78"}
+    rate_limiter.reset()
+
+    for _ in range(120):
+        assert client.get("/api/v1/cart", headers=headers).status_code == status.HTTP_401_UNAUTHORIZED
+
+    blocked = client.get("/api/v1/cart", headers=headers)
+    assert blocked.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert int(blocked.headers["Retry-After"]) >= 1
+
+    rate_limiter.reset()
 

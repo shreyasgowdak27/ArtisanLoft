@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 
 import redis.asyncio as redis
-from fastapi import Request
+from fastapi import HTTPException, Request, status
 from redis.backoff import NoBackoff
 from redis.retry import Retry
 
@@ -36,6 +36,7 @@ class RateLimitResult:
 CONTACT_POLICY = RateLimitPolicy(bucket="contact", limit=3, window_seconds=3600)
 ME_POLICY = RateLimitPolicy(bucket="me", limit=30, window_seconds=60)
 WRITE_POLICY = RateLimitPolicy(bucket="write", limit=30, window_seconds=60)
+READ_POLICY = RateLimitPolicy(bucket="read", limit=120, window_seconds=60)
 
 _INCREMENT_WINDOW_COUNTER = """
 local server_time = redis.call('TIME')
@@ -158,3 +159,19 @@ class FixedWindowRateLimiter:
 
 
 rate_limiter = FixedWindowRateLimiter()
+
+
+async def enforce_read_rate_limit(request: Request) -> None:
+    """Apply the shared read allowance before serving read routes.
+
+    OPTIONS requests are explicitly exempt from rate limiting.
+    """
+    if request.method == "OPTIONS":
+        return
+    result = await rate_limiter.check(READ_POLICY, get_client_ip(request))
+    if not result.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests. Please try again later.",
+            headers={"Retry-After": str(result.retry_after)},
+        )

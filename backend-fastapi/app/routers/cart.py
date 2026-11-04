@@ -6,7 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
-from app.core.rate_limit import WRITE_POLICY, get_client_ip, rate_limiter
+from app.core.rate_limit import (
+    WRITE_POLICY,
+    enforce_read_rate_limit,
+    get_client_ip,
+    rate_limiter,
+)
 from app.schemas.cart import CartItemAdd, CartItemRead, CartItemUpdate, CartRead
 from app.schemas.user import CurrentUser
 from app.services import cart_service
@@ -25,8 +30,15 @@ async def enforce_cart_write_rate_limit(request: Request) -> None:
         )
 
 
-@router.get("", response_model=CartRead)
-async def read_cart(current_user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> CartRead:
+@router.get(
+    "",
+    response_model=CartRead,
+    dependencies=[Depends(enforce_read_rate_limit)],
+)
+async def read_cart(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CartRead:
     return await cart_service.get_cart(db, current_user.id)
 
 

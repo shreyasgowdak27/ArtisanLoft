@@ -52,6 +52,14 @@ The backend API runs at `http://localhost:8000`. You can visit interactive API d
 
 > **Important (Deployment)**: `ENV=production` is **MANDATORY** in deployment (Render), otherwise `localhost:3000` is added to CORS.
 
+### Rate limiter deployment
+
+Set `REDIS_URL` in the Render service environment to the Upstash connection URL, which begins with `rediss://`. Keep the actual value out of this repository and out of `.env.example`.
+
+`REDIS_URL` is optional for local development and tests. When it is unset, the API uses an in memory limiter that is local to one process, so it does not share limits across deployed workers. In Render, set the variable so the rate limiter is shared across workers.
+
+If Redis is slow, unavailable, or returns an error, the API logs a warning and serves the request. This fail open behavior keeps customer traffic available while temporarily disabling rate enforcement.
+
 ### 2. Run the React frontend
 
 Open a separate terminal window and follow these steps:

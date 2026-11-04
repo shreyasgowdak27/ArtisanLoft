@@ -1,5 +1,6 @@
-"""Tests for the shared fixed window rate limiter, including /me route coverage."""
+"""Tests for the shared fixed window rate limiter, including /me, cart write, and order write coverage."""
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,8 +10,16 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import status
 
-from app.core.deps import get_current_user
-from app.core.rate_limit import FixedWindowRateLimiter, RateLimitPolicy, get_client_ip, rate_limiter
+from app.core.deps import get_current_user, get_db
+from app.core.rate_limit import (
+    FixedWindowRateLimiter,
+    RateLimitPolicy,
+    WRITE_POLICY,
+    get_client_ip,
+    rate_limiter,
+)
+from app.schemas.cart import CartItemRead, CartProductRead, CartRead
+from app.schemas.order import OrderRead
 from app.schemas.user import CurrentUser
 
 
@@ -159,3 +168,194 @@ def test_me_rate_limit_redis_error_fails_open(me_client):
         res = me_client.get("/me", headers=headers)
 
     assert res.status_code == status.HTTP_200_OK
+
+
+# ---------------------------------------------------------------------------
+# Shared write route rate limit tests (chunk 3 coverage - spec 0004 AC-3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def write_client(client, monkeypatch):
+    """Client fixture that overrides auth, db, cart_service, and order_service for write tests."""
+    rate_limiter.reset()
+    client.app.dependency_overrides[get_current_user] = lambda: CurrentUser(
+        id="rate-limit-write-user",
+        email="write-rate@artisanloft.in",
+    )
+
+    async def override_db():
+        yield object()
+
+    client.app.dependency_overrides[get_db] = override_db
+
+    fake_item = CartItemRead(
+        product_id=uuid.UUID("3fa85f64-5717-4562-b3fc-2c963f66afa6"),
+        quantity=1,
+        product=CartProductRead(
+            id=uuid.UUID("3fa85f64-5717-4562-b3fc-2c963f66afa6"),
+            slug="oak-table",
+            name="Oak Table",
+            image_url=None,
+            price_cents=2999900,
+            currency="INR",
+            stock=8,
+            is_active=True,
+        ),
+        line_total_cents=2999900,
+    )
+    fake_cart = CartRead(
+        items=[],
+        item_count=0,
+        total_quantity=0,
+        subtotal_cents=0,
+        currency="INR",
+    )
+    monkeypatch.setattr("app.routers.cart.cart_service.add_item", AsyncMock(return_value=fake_item))
+    monkeypatch.setattr("app.routers.cart.cart_service.update_item", AsyncMock(return_value=fake_item))
+    monkeypatch.setattr("app.routers.cart.cart_service.delete_item", AsyncMock(return_value=None))
+    monkeypatch.setattr("app.routers.cart.cart_service.get_cart", AsyncMock(return_value=fake_cart))
+
+    fake_order = OrderRead(
+        id=uuid.UUID("33333333-3333-3333-3333-333333333333"),
+        status="pending",
+        total_cents=2999900,
+        shipping_name="Shreyas Gowda",
+        shipping_line1="12 MG Road",
+        shipping_line2=None,
+        shipping_city="Bengaluru",
+        shipping_state="Karnataka",
+        shipping_pincode="560001",
+        shipping_country="IN",
+        created_at=datetime.now(UTC),
+        items=[],
+    )
+    monkeypatch.setattr("app.routers.orders.order_service.create_order", AsyncMock(return_value=fake_order))
+    monkeypatch.setattr("app.routers.orders.order_service.pay_order", AsyncMock(return_value=fake_order))
+    monkeypatch.setattr("app.routers.orders.order_service.list_orders", AsyncMock(return_value=[fake_order]))
+    monkeypatch.setattr("app.routers.orders.order_service.get_order", AsyncMock(return_value=fake_order))
+
+    yield client
+    client.app.dependency_overrides.clear()
+    rate_limiter.reset()
+
+
+def test_cart_and_order_writes_drain_same_counter_while_reads_unaffected(write_client):
+    """Cart mutations and order writes share one bucket of 30 req/60s, while reads stay unaffected."""
+    headers = {"X-Forwarded-For": "203.0.113.70"}
+    cart_payload = {"product_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6", "quantity": 1}
+    order_payload = {
+        "shipping_name": "Shreyas Gowda",
+        "shipping_line1": "12 MG Road",
+        "shipping_city": "Bengaluru",
+        "shipping_state": "Karnataka",
+        "shipping_pincode": "560001",
+        "shipping_country": "IN",
+    }
+    order_id = "33333333-3333-3333-3333-333333333333"
+
+    # 20 cart writes drain part of the shared bucket
+    for i in range(20):
+        res = write_client.post("/api/v1/cart/items", json=cart_payload, headers=headers)
+        assert res.status_code == status.HTTP_200_OK, f"Cart write {i + 1} unexpectedly blocked"
+
+    # 10 order writes drain the remainder of the 30 req allowance
+    for i in range(10):
+        res = write_client.post("/api/v1/orders", json=order_payload, headers=headers)
+        assert res.status_code == status.HTTP_200_OK, f"Order write {i + 1} unexpectedly blocked"
+
+    # 31st write request (from either cart or order) is blocked with 429 and Retry-After
+    blocked_cart = write_client.post("/api/v1/cart/items", json=cart_payload, headers=headers)
+    assert blocked_cart.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert "Retry-After" in blocked_cart.headers
+    assert int(blocked_cart.headers["Retry-After"]) >= 1
+
+    blocked_order = write_client.post(f"/api/v1/orders/{order_id}/pay", headers=headers)
+    assert blocked_order.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert "Retry-After" in blocked_order.headers
+
+    # Reads on cart and orders stay completely unaffected even with an exhausted write bucket
+    cart_read = write_client.get("/api/v1/cart", headers=headers)
+    assert cart_read.status_code == status.HTTP_200_OK
+
+    orders_read = write_client.get("/api/v1/orders", headers=headers)
+    assert orders_read.status_code == status.HTTP_200_OK
+
+    order_detail_read = write_client.get(f"/api/v1/orders/{order_id}", headers=headers)
+    assert order_detail_read.status_code == status.HTTP_200_OK
+
+
+def test_write_rate_limit_different_ip_not_affected(write_client):
+    """A second client IP has its own counter and is not blocked by another IP's writes."""
+    ip_a = {"X-Forwarded-For": "203.0.113.71"}
+    ip_b = {"X-Forwarded-For": "203.0.113.72"}
+    cart_payload = {"product_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6", "quantity": 1}
+    order_payload = {
+        "shipping_name": "Shreyas Gowda",
+        "shipping_line1": "12 MG Road",
+        "shipping_city": "Bengaluru",
+        "shipping_state": "Karnataka",
+        "shipping_pincode": "560001",
+        "shipping_country": "IN",
+    }
+
+    for _ in range(15):
+        write_client.post("/api/v1/cart/items", json=cart_payload, headers=ip_a)
+    for _ in range(15):
+        write_client.post("/api/v1/orders", json=order_payload, headers=ip_a)
+
+    # IP A is blocked
+    assert write_client.post("/api/v1/cart/items", json=cart_payload, headers=ip_a).status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+    # IP B proceeds without interference
+    res_b = write_client.post("/api/v1/cart/items", json=cart_payload, headers=ip_b)
+    assert res_b.status_code == status.HTTP_200_OK
+
+
+def test_cart_mutations_share_write_bucket(write_client):
+    """POST, PATCH, and DELETE cart routes share the same write rate limit bucket."""
+    headers = {"X-Forwarded-For": "203.0.113.73"}
+    pid = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+
+    for _ in range(10):
+        res = write_client.post("/api/v1/cart/items", json={"product_id": pid, "quantity": 1}, headers=headers)
+        assert res.status_code == status.HTTP_200_OK
+
+    for _ in range(10):
+        res = write_client.patch(f"/api/v1/cart/items/{pid}", json={"quantity": 2}, headers=headers)
+        assert res.status_code == status.HTTP_200_OK
+
+    for _ in range(10):
+        res = write_client.delete(f"/api/v1/cart/items/{pid}", headers=headers)
+        assert res.status_code == status.HTTP_204_NO_CONTENT
+
+    # 31st request on any write mutation is blocked
+    blocked = write_client.post("/api/v1/cart/items", json={"product_id": pid, "quantity": 1}, headers=headers)
+    assert blocked.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+
+
+def test_order_create_and_pay_share_write_bucket(write_client):
+    """Order creation and order payment share the write rate limit bucket."""
+    headers = {"X-Forwarded-For": "203.0.113.74"}
+    payload = {
+        "shipping_name": "Shreyas Gowda",
+        "shipping_line1": "12 MG Road",
+        "shipping_city": "Bengaluru",
+        "shipping_state": "Karnataka",
+        "shipping_pincode": "560001",
+        "shipping_country": "IN",
+    }
+    order_id = "33333333-3333-3333-3333-333333333333"
+
+    for _ in range(15):
+        res = write_client.post("/api/v1/orders", json=payload, headers=headers)
+        assert res.status_code == status.HTTP_200_OK
+
+    for _ in range(15):
+        res = write_client.post(f"/api/v1/orders/{order_id}/pay", headers=headers)
+        assert res.status_code == status.HTTP_200_OK
+
+    # 31st request on either endpoint is blocked
+    blocked = write_client.post("/api/v1/orders", json=payload, headers=headers)
+    assert blocked.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+

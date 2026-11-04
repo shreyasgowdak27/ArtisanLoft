@@ -34,6 +34,7 @@ class RateLimitResult:
 
 
 CONTACT_POLICY = RateLimitPolicy(bucket="contact", limit=3, window_seconds=3600)
+ME_POLICY = RateLimitPolicy(bucket="me", limit=30, window_seconds=60)
 
 _INCREMENT_WINDOW_COUNTER = """
 local server_time = redis.call('TIME')

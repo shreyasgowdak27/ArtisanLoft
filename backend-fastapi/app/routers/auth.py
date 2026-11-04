@@ -4,19 +4,33 @@ Supabase Auth handles user signup, login, and password management directly in th
 FastAPI verifies the incoming Supabase JWT via `get_current_user`.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.core.deps import get_current_user
+from app.core.rate_limit import ME_POLICY, get_client_ip, rate_limiter
 from app.schemas.user import CurrentUser
 
 router = APIRouter(tags=["auth"])
+
+
+async def enforce_me_rate_limit(request: Request) -> None:
+    """Apply the /me identity allowance before returning user data."""
+    result = await rate_limiter.check(ME_POLICY, get_client_ip(request))
+    if not result.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests. Please try again later.",
+            headers={"Retry-After": str(result.retry_after)},
+        )
 
 
 @router.get("/me", response_model=CurrentUser)
 @router.get("/api/v1/me", response_model=CurrentUser)
 @router.get("/api/auth/me", response_model=CurrentUser)
 async def get_me(
+    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
+    _rate_limit: None = Depends(enforce_me_rate_limit),
 ) -> CurrentUser:
     """Return the authenticated user's id and email."""
     return current_user

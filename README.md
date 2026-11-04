@@ -1,4 +1,4 @@
-f# ArtisanLoft: Professional Furniture E-commerce Application
+# ArtisanLoft: Professional Furniture E-commerce Application
 
 [![Backend FastAPI CI](https://github.com/shreyasgowdak27/ArtisanLoft-Furniture/actions/workflows/backend-fastapi-ci.yml/badge.svg?branch=main)](https://github.com/shreyasgowdak27/ArtisanLoft-Furniture/actions/workflows/backend-fastapi-ci.yml)
 
@@ -12,7 +12,67 @@ ArtisanLoft is a modern, minimalist full-stack e-commerce application designed f
 - **JDBC Persistence**: High-performance data access without the overhead of ORM.
 - **Responsive Design**: Fully optimized for desktop, tablet, and mobile.
 
-## Prerequisites
+## Run locally
+
+You can run both the FastAPI backend and the React frontend locally on your computer for demos or development.
+
+### Prerequisites
+
+Make sure you have installed:
+* Python 3.11 or newer
+* Node.js 18 or newer with npm
+* A Supabase project with database access
+
+### 1. Run the FastAPI backend
+
+Open your terminal and follow these steps to start the API:
+
+```bash
+cd backend-fastapi
+
+# Create and activate a Python virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Ensure your local environment file exists
+# Copy .env.example to .env if you do not already have one
+# Ensure DATABASE_URL and JWT_SECRET are populated
+
+# Apply database migrations if needed
+alembic upgrade head
+
+# Start the development server
+uvicorn app.main:app --reload --port 8000
+```
+
+The backend API runs at `http://localhost:8000`. You can visit interactive API documentation at `http://localhost:8000/docs` or check health status at `http://localhost:8000/health`.
+
+> **Important (Deployment)**: `ENV=production` is **MANDATORY** in deployment (Render), otherwise `localhost:3000` is added to CORS.
+
+### 2. Run the React frontend
+
+Open a separate terminal window and follow these steps:
+
+```bash
+cd frontend
+
+# Install dependencies
+npm install
+
+# Configure the frontend for local development
+# Create frontend/.env.local (this file is gitignored):
+echo "REACT_APP_API_URL=http://localhost:8000" > .env.local
+
+# Start the React development server
+npm start
+```
+
+The frontend will start at `http://localhost:3000` and automatically communicate with your local backend at `http://localhost:8000`.
+
+## Legacy Spring Boot Backend Setup (Reference Only)
 - **Java 17** or higher
 - **Node.js 18.x** or higher
 - **Maven 3.8+**

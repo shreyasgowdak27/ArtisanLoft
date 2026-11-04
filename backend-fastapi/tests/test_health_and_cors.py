@@ -69,3 +69,28 @@ def test_cors_middleware_headers(client: TestClient) -> None:
     assert disallowed_resp.status_code == 200
     assert "access-control-allow-origin" not in disallowed_resp.headers
 
+
+def test_cors_dev_mode_permits_localhost() -> None:
+    """In development mode, http://localhost:3000 is always allowed."""
+    dev_settings = Settings(
+        DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/db",
+        JWT_SECRET="test-secret-at-least-32-chars-long-12345",
+        ENV="development",
+        CORS_ORIGINS="https://artisanloft.vercel.app",
+    )
+    assert "http://localhost:3000" in dev_settings.CORS_ORIGINS
+    assert "https://artisanloft.vercel.app" in dev_settings.CORS_ORIGINS
+
+
+def test_cors_production_mode_excludes_localhost() -> None:
+    """In production mode, localhost is removed and production origins remain unchanged."""
+    prod_settings = Settings(
+        DATABASE_URL="postgresql+asyncpg://user:pass@localhost:5432/db",
+        JWT_SECRET="test-secret-at-least-32-chars-long-12345",
+        ENV="production",
+        CORS_ORIGINS="https://artisanloft.vercel.app,http://localhost:3000",
+    )
+    assert "http://localhost:3000" not in prod_settings.CORS_ORIGINS
+    assert prod_settings.CORS_ORIGINS == ["https://artisanloft.vercel.app"]
+
+

@@ -7,7 +7,7 @@ missing — better to crash early than to silently use wrong config.
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 _ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
@@ -48,6 +48,24 @@ class Settings(BaseSettings):
     # App
     FRONTEND_URL: str = "http://localhost:3000"
     ENV: str = "development"
+
+    @property
+    def is_production(self) -> bool:
+        return self.ENV.strip().lower() in ("production", "prod")
+
+    @model_validator(mode="after")
+    def adjust_cors_for_environment(self) -> "Settings":
+        local_origins = {"http://localhost:3000", "http://127.0.0.1:3000"}
+        if self.is_production:
+            # In production, remove local origins to keep production CORS strict
+            self.CORS_ORIGINS = [
+                origin for origin in self.CORS_ORIGINS if origin.rstrip("/") not in local_origins
+            ]
+        else:
+            # In local or dev mode, ensure http://localhost:3000 is always permitted
+            if "http://localhost:3000" not in self.CORS_ORIGINS:
+                self.CORS_ORIGINS.append("http://localhost:3000")
+        return self
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

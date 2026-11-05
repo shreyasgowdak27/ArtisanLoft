@@ -30,13 +30,15 @@ async def enforce_order_write_rate_limit(request: Request) -> None:
         )
 
 
-@router.post("", response_model=OrderRead)
+@router.post(
+    "",
+    response_model=OrderRead,
+    dependencies=[Depends(enforce_order_write_rate_limit)],
+)
 async def create_order(
     payload: OrderCreate,
-    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _rate_limit: None = Depends(enforce_order_write_rate_limit),
 ) -> OrderRead:
     return await order_service.create_order(db, current_user.id, payload)
 
@@ -53,13 +55,15 @@ async def list_orders(
     return await order_service.list_orders(db, current_user.id)
 
 
-@router.post("/{order_id}/pay", response_model=OrderRead)
+@router.post(
+    "/{order_id}/pay",
+    response_model=OrderRead,
+    dependencies=[Depends(enforce_order_write_rate_limit)],
+)
 async def pay_order(
     order_id: uuid.UUID,
-    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _rate_limit: None = Depends(enforce_order_write_rate_limit),
 ) -> OrderRead:
     return await order_service.pay_order(db, current_user.id, order_id)
 

@@ -124,6 +124,52 @@ def test_me_rate_limit_31st_request_returns_429(me_client):
     assert int(blocked.headers["Retry-After"]) >= 1
 
 
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("/me", None),
+        (
+            "/api/v1/cart/items",
+            {"product_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6", "quantity": 1},
+        ),
+        (
+            "/api/v1/orders",
+            {
+                "shipping_name": "Shreyas Gowda",
+                "shipping_line1": "12 MG Road",
+                "shipping_city": "Bengaluru",
+                "shipping_state": "Karnataka",
+                "shipping_pincode": "560001",
+                "shipping_country": "IN",
+            },
+        ),
+    ],
+    ids=["me", "cart-write", "order-write"],
+)
+def test_unauthenticated_protected_requests_are_limited_before_authentication(
+    client, path, payload
+):
+    """The 31st request is rejected by its limiter before authentication runs."""
+    headers = {"X-Forwarded-For": "203.0.113.41"}
+    rate_limiter.reset()
+
+    for _ in range(30):
+        if payload is None:
+            response = client.get(path, headers=headers)
+        else:
+            response = client.post(path, json=payload, headers=headers)
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    if payload is None:
+        blocked = client.get(path, headers=headers)
+    else:
+        blocked = client.post(path, json=payload, headers=headers)
+    assert blocked.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    assert int(blocked.headers["Retry-After"]) >= 1
+
+    rate_limiter.reset()
+
+
 def test_me_rate_limit_different_user_ip_not_affected(me_client):
     """A second client IP has its own independent counter and is not blocked (AC-2, AC-6)."""
     ip_a = {"X-Forwarded-For": "203.0.113.100"}

@@ -24,13 +24,23 @@ async def enforce_me_rate_limit(request: Request) -> None:
         )
 
 
-@router.get("/me", response_model=CurrentUser)
-@router.get("/api/v1/me", response_model=CurrentUser)
-@router.get("/api/auth/me", response_model=CurrentUser)
+@router.get(
+    "/me",
+    response_model=CurrentUser,
+    dependencies=[Depends(enforce_me_rate_limit)],
+)
+@router.get(
+    "/api/v1/me",
+    response_model=CurrentUser,
+    dependencies=[Depends(enforce_me_rate_limit)],
+)
+@router.get(
+    "/api/auth/me",
+    response_model=CurrentUser,
+    dependencies=[Depends(enforce_me_rate_limit)],
+)
 async def get_me(
-    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
-    _rate_limit: None = Depends(enforce_me_rate_limit),
 ) -> CurrentUser:
     """Return the authenticated user's id and email."""
     return current_user

@@ -42,25 +42,29 @@ async def read_cart(
     return await cart_service.get_cart(db, current_user.id)
 
 
-@router.post("/items", response_model=CartItemRead)
+@router.post(
+    "/items",
+    response_model=CartItemRead,
+    dependencies=[Depends(enforce_cart_write_rate_limit)],
+)
 async def add_cart_item(
     payload: CartItemAdd,
-    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _rate_limit: None = Depends(enforce_cart_write_rate_limit),
 ) -> CartItemRead:
     return await cart_service.add_item(db, current_user.id, payload)
 
 
-@router.patch("/items/{product_id}", response_model=CartItemRead)
+@router.patch(
+    "/items/{product_id}",
+    response_model=CartItemRead,
+    dependencies=[Depends(enforce_cart_write_rate_limit)],
+)
 async def update_cart_item(
     product_id: uuid.UUID,
     payload: CartItemUpdate,
-    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _rate_limit: None = Depends(enforce_cart_write_rate_limit),
 ) -> CartItemRead | Response:
     item = await cart_service.update_item(db, current_user.id, product_id, payload)
     if item is None:
@@ -68,13 +72,15 @@ async def update_cart_item(
     return item
 
 
-@router.delete("/items/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/items/{product_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(enforce_cart_write_rate_limit)],
+)
 async def delete_cart_item(
     product_id: uuid.UUID,
-    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    _rate_limit: None = Depends(enforce_cart_write_rate_limit),
 ) -> Response:
     await cart_service.delete_item(db, current_user.id, product_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

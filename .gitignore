@@ -29,8 +29,13 @@ frontend/build/
 .claude/
 .windsurf/
 skills-lock.json
+AGENTS.md
+CLAUDE.md
 .DS_Store
 
 # local documentation notes and reviews
+context/
+docs/specs/
+docs/scope/
 docs/INTERVIEW-GUIDE.md
 docs/reviews/

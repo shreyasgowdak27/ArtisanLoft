@@ -1,8 +1,7 @@
 """Seed script — loads all 30 ArtisanLoft products into Postgres.
 
-Run with:
-    cd backend-fastapi
-    .venv/bin/python -m app.seed
+Run from backend-fastapi with:
+    python -m app.seed --confirm
 
 Design:
 - Idempotent: if a product with the same slug already exists it is updated
@@ -13,6 +12,7 @@ Design:
   to the hard-coded Unsplash URLs below.
 """
 
+import argparse
 import asyncio
 import json
 import re
@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 # ------------------------------------------------------------------
 # Bootstrap: make sure the project root is importable when running
@@ -337,53 +337,75 @@ async def seed() -> None:
     )
     session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
 
-    async with session_factory() as db:
-        inserted = updated = 0
-        for item in SAMPLE_PRODUCTS:
-            name: str = item["name"]
-            slug: str = _slugify(name)
+    try:
+        async with session_factory() as db:
+            inserted = updated = 0
+            for item in SAMPLE_PRODUCTS:
+                name: str = item["name"]
+                slug: str = _slugify(name)
 
-            # Override images from product_images.json if available
-            img = images.get(name, {})
-            image_url = img.get("imageUrl") or item["image_url"]
-            image_urls = img.get("imageUrls") or item.get("image_urls", "")
+                # Override images from product_images.json if available
+                img = images.get(name, {})
+                image_url = img.get("imageUrl") or item["image_url"]
+                image_urls = img.get("imageUrls") or item.get("image_urls", "")
 
-            price_cents: int = _rupees_to_paise(item["price"])
+                price_cents: int = _rupees_to_paise(item["price"])
 
-            result = await db.execute(select(Product).where(Product.slug == slug))
-            existing = result.scalar_one_or_none()
+                result = await db.execute(select(Product).where(Product.slug == slug))
+                existing = result.scalar_one_or_none()
 
-            if existing is None:
-                db.add(
-                    Product(
-                        name=name,
-                        slug=slug,
-                        description=item.get("description"),
-                        price_cents=price_cents,
-                        currency="INR",
-                        category=item.get("category"),
-                        image_url=image_url,
-                        image_urls=image_urls,
-                        stock=100,
-                        is_active=True,
+                if existing is None:
+                    db.add(
+                        Product(
+                            name=name,
+                            slug=slug,
+                            description=item.get("description"),
+                            price_cents=price_cents,
+                            currency="INR",
+                            category=item.get("category"),
+                            image_url=image_url,
+                            image_urls=image_urls,
+                            stock=100,
+                            is_active=True,
+                        )
                     )
-                )
-                inserted += 1
-            else:
-                # Update mutable fields — slug and id are stable identifiers.
-                existing.name = name
-                existing.description = item.get("description")
-                existing.price_cents = price_cents
-                existing.category = item.get("category")
-                existing.image_url = image_url
-                existing.image_urls = image_urls
-                updated += 1
+                    inserted += 1
+                else:
+                    # Update mutable fields — slug and id are stable identifiers.
+                    existing.name = name
+                    existing.description = item.get("description")
+                    existing.price_cents = price_cents
+                    existing.category = item.get("category")
+                    existing.image_url = image_url
+                    existing.image_urls = image_urls
+                    updated += 1
 
-        await db.commit()
-        print(f"Seed complete — inserted: {inserted}, updated: {updated}")
+            await db.commit()
+            print(f"Seed complete — inserted: {inserted}, updated: {updated}")
+    finally:
+        await engine.dispose()
 
-    await engine.dispose()
+
+def main(argv: list[str] | None = None) -> int:
+    """Require a deliberate confirmation before connecting to the database."""
+    parser = argparse.ArgumentParser(description="Seed the ArtisanLoft product catalog.")
+    parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="confirm inserting or updating the 30 sample products",
+    )
+    args = parser.parse_args(argv)
+
+    if settings.is_production:
+        print("Refusing to seed while ENV is production.", file=sys.stderr)
+        return 1
+    if not args.confirm:
+        print("Refusing to seed without --confirm.", file=sys.stderr)
+        return 2
+
+    asyncio.run(seed())
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(seed())
+    raise SystemExit(main())

@@ -20,6 +20,12 @@ A furniture storefront built with React, FastAPI, Supabase, and Redis.
 | --- | --- | --- |
 | ![Cart with selected furniture](assets/screenshots/cart.png)<br>Review items and order total. | ![Checkout payment pending](assets/screenshots/checkout.png)<br>Confirm the order with demo payment. | ![Paid order receipt](assets/screenshots/receipt.png)<br>View the confirmed order summary. |
 
+## Demo video
+
+[Watch the 3-minute UI walkthrough](https://drive.google.com/file/d/1Y6hrF95Nt5zV59Rb0BYYpnY9w9mrsw9q/view?usp=sharing)
+
+A quick tour of the live app: browsing the collection, login, cart, checkout, demo payment and receipt. The architecture and engineering decisions are documented above.
+
 ## Architecture
 
 ```mermaid

@@ -10,6 +10,12 @@ A furniture storefront built with React, FastAPI, Supabase, and Redis.
 - API: [artisan-loft-api.onrender.com](https://artisan-loft-api.onrender.com)
 - Health: [API health check](https://artisan-loft-api.onrender.com/health)
 
+## Screenshots
+
+| Home | Collection | Product detail |
+| --- | --- | --- |
+| ![ArtisanLoft home page](assets/screenshots/Home.png) | ![Furniture collection](assets/screenshots/collection.png) | ![Product detail](assets/screenshots/product-detail.png) |
+
 ## Architecture
 
 ```mermaid
@@ -61,7 +67,7 @@ cp backend-fastapi/.env.example backend-fastapi/.env
 cp frontend/.env.example frontend/.env.local
 ```
 
-Set the Supabase project URL, anon key, and Postgres transaction pooler URL in the environment files. Set the backend `ENV=development` and the frontend `REACT_APP_API_URL=http://localhost:8000`. Keep `.env` and `.env.local` private.
+Set the backend `DATABASE_URL` to your Supabase Postgres transaction pooler URL and set `JWT_SECRET` to a random value of at least 32 characters. Set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` from your Supabase project. For the frontend, set `REACT_APP_SUPABASE_URL`, `REACT_APP_SUPABASE_ANON_KEY`, and `REACT_APP_API_URL=http://localhost:8000`. `REDIS_URL` is optional for local development. Keep `.env` and `.env.local` private.
 
 ### Start the backend
 
@@ -102,6 +108,15 @@ pytest
 ```
 
 GitHub Actions uses the same development requirements and runs `pytest` on Python 3.12.
+
+## API routes
+
+- Products: `GET /api/v1/products` and `GET /api/v1/products/{slug}`
+- Cart: `GET /api/v1/cart`, `POST /api/v1/cart/items`, `PATCH /api/v1/cart/items/{product_id}`, and `DELETE /api/v1/cart/items/{product_id}`
+- Orders: `POST /api/v1/orders`, `GET /api/v1/orders`, `GET /api/v1/orders/{order_id}`, and `POST /api/v1/orders/{order_id}/pay`
+- Contact: `POST /api/v1/contact`
+- Current user: `GET /me`, `GET /api/v1/me`, and `GET /api/auth/me`
+- Health: `GET /health` and `GET /health/ready`
 
 ## Deployment
 

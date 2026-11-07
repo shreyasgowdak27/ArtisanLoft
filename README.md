@@ -16,6 +16,10 @@ A furniture storefront built with React, FastAPI, Supabase, and Redis.
 | --- | --- | --- |
 | ![ArtisanLoft home page](assets/screenshots/Home.png) | ![Furniture collection](assets/screenshots/collection.png) | ![Product detail](assets/screenshots/product-detail.png) |
 
+| Cart | Checkout | Receipt |
+| --- | --- | --- |
+| ![Cart with selected furniture](assets/screenshots/cart.png)<br>Review items and order total. | ![Checkout payment pending](assets/screenshots/checkout.png)<br>Confirm the order with demo payment. | ![Paid order receipt](assets/screenshots/receipt.png)<br>View the confirmed order summary. |
+
 ## Architecture
 
 ```mermaid

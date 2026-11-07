@@ -42,9 +42,8 @@ This limits abusive traffic before it uses authentication or route resources.
 If Upstash is unavailable, the API allows the request and logs the failure.
 This keeps the storefront available during a Redis outage.
 
-### Row level security protects user data
-Supabase RLS policies scope cart and order rows to the signed in user's ID.
-This adds a database level ownership check alongside API authorization.
+### Row level security policies
+The migrations define owner policies for `cart_items`, `orders`, and `order_items` when requests use Supabase's `authenticated` role with the user's JWT claims. FastAPI verifies the JWT in the API, but its SQLAlchemy database sessions do not set those claims. API cart and order access therefore relies on explicit ownership checks in the service code. The README setup uses a Supabase transaction pooler URL; a shared pooler URL normally connects as the `postgres` role, which bypasses RLS. The actual deployed database role is set outside this repository. `contact_messages` has RLS enabled without policies, so roles subject to RLS cannot access its rows.
 
 ### JWTs are verified with JWKS
 FastAPI checks Supabase token signatures, expiry, and the `authenticated` audience.

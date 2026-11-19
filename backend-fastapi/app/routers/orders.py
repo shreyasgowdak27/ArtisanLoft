@@ -2,7 +2,7 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -37,10 +37,18 @@ async def enforce_order_write_rate_limit(request: Request) -> None:
 )
 async def create_order(
     payload: OrderCreate,
+    idempotency_key: str | None = Header(default=None, max_length=255),
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> OrderRead:
-    return await order_service.create_order(db, current_user.id, payload)
+    if idempotency_key is not None:
+        idempotency_key = idempotency_key.strip() or None
+    return await order_service.create_order(
+        db,
+        current_user.id,
+        payload,
+        idempotency_key=idempotency_key,
+    )
 
 
 @router.get(

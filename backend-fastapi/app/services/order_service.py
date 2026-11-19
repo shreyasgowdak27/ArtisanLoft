@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -34,28 +35,70 @@ def _lock_products_statement(product_ids: list[uuid.UUID]):
     )
 
 
+def _lock_cart_items_statement(user_id: uuid.UUID):
+    """Locks the user's checkout cart rows before their quantities are read."""
+    return (
+        select(CartItem)
+        .where(CartItem.user_id == user_id)
+        .order_by(CartItem.product_id.asc())
+        .with_for_update()
+    )
+
+
+def _order_by_idempotency_key_statement(user_id: uuid.UUID, idempotency_key: str):
+    return (
+        select(Order)
+        .options(selectinload(Order.items))
+        .where(
+            Order.user_id == user_id,
+            Order.idempotency_key == idempotency_key,
+        )
+    )
+
+
 async def create_order(
-    db: AsyncSession, user_id: str, payload: OrderCreate
+    db: AsyncSession,
+    user_id: str,
+    payload: OrderCreate,
+    idempotency_key: str | None = None,
 ) -> OrderRead:
     """Creates an order atomically within a single transaction.
 
     Steps:
-    1. Fetch cart items for the authenticated user. If empty, raise 400.
-    2. Acquire SELECT ... FOR UPDATE locks on product rows sorted by product_id ASC.
-    3. Verify active status and sufficient stock for every cart item.
-    4. If any item has insufficient stock, rollback and raise 400.
-    5. Decrement stock on product rows.
+    1. Return an existing order for a previously used idempotency key.
+    2. Lock and fetch cart rows for the authenticated user. If empty, raise 400.
+    3. Acquire SELECT ... FOR UPDATE locks on product rows sorted by product_id ASC.
+    4. Verify active status and sufficient stock for every cart item.
+    5. Decrement stock with a conditional SQL UPDATE.
     6. Snapshot product name and unit price (BIGINT integer paise).
     7. Insert Order and OrderItem rows.
-    8. Clear user's cart items.
+    8. Clear the locked cart items.
     9. Commit transaction and return OrderRead. Rollback on any failure.
     """
     owner_id = _user_uuid(user_id)
     try:
-        cart_items_res = await db.execute(
-            select(CartItem).where(CartItem.user_id == owner_id).order_by(CartItem.created_at)
-        )
+        if idempotency_key is not None:
+            existing_order = await db.scalar(
+                _order_by_idempotency_key_statement(owner_id, idempotency_key)
+            )
+            if existing_order is not None:
+                existing_order_read = OrderRead.model_validate(existing_order)
+                await db.rollback()
+                return existing_order_read
+
+        cart_items_res = await db.execute(_lock_cart_items_statement(owner_id))
         cart_items = list(cart_items_res.scalars().all())
+
+        # A concurrent request with this key waits for the cart lock above. Once
+        # it acquires the lock, this second lookup sees the committed order.
+        if idempotency_key is not None:
+            existing_order = await db.scalar(
+                _order_by_idempotency_key_statement(owner_id, idempotency_key)
+            )
+            if existing_order is not None:
+                existing_order_read = OrderRead.model_validate(existing_order)
+                await db.rollback()
+                return existing_order_read
 
         if not cart_items:
             raise HTTPException(
@@ -87,17 +130,26 @@ async def create_order(
             product = locked_products[item.product_id]
             if not product.is_active:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
+                    status_code=status.HTTP_409_CONFLICT,
                     detail=f"Product '{product.name}' is no longer available",
                 )
             if product.stock < item.quantity:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
+                    status_code=status.HTTP_409_CONFLICT,
                     detail=f"Insufficient stock for product '{product.name}'. Available: {product.stock}, requested: {item.quantity}",
                 )
 
-            # Atomic stock decrement within the locked transaction
-            product.stock -= item.quantity
+            stock_update = await db.execute(
+                update(Product)
+                .where(Product.id == product.id, Product.stock >= item.quantity)
+                .values(stock=Product.stock - item.quantity)
+                .returning(Product.id)
+            )
+            if stock_update.scalar_one_or_none() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Insufficient stock for product '{product.name}'",
+                )
 
             # Snapshots of product name and unit price in integer paise
             unit_price_cents = product.price_cents
@@ -120,6 +172,7 @@ async def create_order(
             user_id=owner_id,
             status="pending",
             total_cents=total_cents,
+            idempotency_key=idempotency_key,
             shipping_name=payload.shipping_name,
             shipping_line1=payload.shipping_line1,
             shipping_line2=payload.shipping_line2,
@@ -131,15 +184,25 @@ async def create_order(
             items=order_items_to_create,
         )
         db.add(order)
+        await db.flush()
 
-        # Clear cart items in the same transaction
-        await db.execute(delete(CartItem).where(CartItem.user_id == owner_id))
+        # Clear only the locked rows so an item added while checkout was in
+        # progress is not lost.
+        await db.execute(delete(CartItem).where(CartItem.id.in_([item.id for item in cart_items])))
 
         await db.commit()
-        # Refresh order and eagerly load items after commit (expire_on_commit=True
-        # invalidates in-memory attributes; async sessions cannot lazy-load).
-        await db.refresh(order, ["items"])
         return OrderRead.model_validate(order)
+    except IntegrityError:
+        await db.rollback()
+        if idempotency_key is not None:
+            existing_order = await db.scalar(
+                _order_by_idempotency_key_statement(owner_id, idempotency_key)
+            )
+            if existing_order is not None:
+                existing_order_read = OrderRead.model_validate(existing_order)
+                await db.rollback()
+                return existing_order_read
+        raise
     except Exception:
         await db.rollback()
         raise

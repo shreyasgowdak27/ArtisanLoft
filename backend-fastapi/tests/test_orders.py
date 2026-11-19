@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_db
@@ -116,7 +116,7 @@ def test_order_routes_require_login(client):
 
 def test_create_order_endpoint_success(authenticated_client, monkeypatch):
     """AC-1: POST /api/v1/orders returns the created order with status pending."""
-    async def fake_create_order(_db, user_id, payload):
+    async def fake_create_order(_db, user_id, payload, idempotency_key=None):
         assert user_id == USER_A
         assert payload.shipping_name == "Shreyas Gowda"
         return sample_order()
@@ -137,7 +137,7 @@ def test_create_order_endpoint_success(authenticated_client, monkeypatch):
 
 def test_create_order_empty_cart_returns_400(authenticated_client, monkeypatch):
     """AC-4: Empty cart checkout returns 400."""
-    async def fake_create_order(_db, _user_id, _payload):
+    async def fake_create_order(_db, _user_id, _payload, idempotency_key=None):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot place order: cart is empty")
 
     monkeypatch.setattr(order_service, "create_order", fake_create_order)
@@ -148,18 +148,55 @@ def test_create_order_empty_cart_returns_400(authenticated_client, monkeypatch):
 
 
 def test_create_order_insufficient_stock_returns_400(authenticated_client, monkeypatch):
-    """AC-2: Insufficient stock returns 400 with clear message."""
-    async def fake_create_order(_db, _user_id, _payload):
+    """AC-2: Insufficient stock returns 409 with clear message."""
+    async def fake_create_order(_db, _user_id, _payload, idempotency_key=None):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
             detail="Insufficient stock for product 'Oak Dining Table'. Available: 1, requested: 2",
         )
 
     monkeypatch.setattr(order_service, "create_order", fake_create_order)
 
     response = authenticated_client.post("/api/v1/orders", json=VALID_SHIPPING_PAYLOAD)
-    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.status_code == status.HTTP_409_CONFLICT
     assert "Insufficient stock" in response.json()["detail"]
+
+
+def test_create_order_blank_or_whitespace_idempotency_key_treated_as_none(authenticated_client, monkeypatch):
+    """A blank or whitespace-only Idempotency-Key header must be treated as None."""
+    captured_keys = []
+
+    async def fake_create_order(_db, _user_id, _payload, idempotency_key=None):
+        captured_keys.append(idempotency_key)
+        return sample_order()
+
+    monkeypatch.setattr(order_service, "create_order", fake_create_order)
+
+    # Whitespace-only header
+    res1 = authenticated_client.post(
+        "/api/v1/orders",
+        json=VALID_SHIPPING_PAYLOAD,
+        headers={"Idempotency-Key": "   "},
+    )
+    assert res1.status_code == status.HTTP_200_OK
+
+    # Blank header
+    res2 = authenticated_client.post(
+        "/api/v1/orders",
+        json=VALID_SHIPPING_PAYLOAD,
+        headers={"Idempotency-Key": ""},
+    )
+    assert res2.status_code == status.HTTP_200_OK
+
+    # Surrounding whitespace stripped
+    res3 = authenticated_client.post(
+        "/api/v1/orders",
+        json=VALID_SHIPPING_PAYLOAD,
+        headers={"Idempotency-Key": "  valid-key-123  "},
+    )
+    assert res3.status_code == status.HTTP_200_OK
+
+    assert captured_keys == [None, None, "valid-key-123"]
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +305,7 @@ async def test_order_service_insufficient_stock_rollback():
     with pytest.raises(HTTPException) as exc_info:
         await order_service.create_order(db, USER_A, payload)
 
-    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc_info.value.status_code == status.HTTP_409_CONFLICT
     assert "Insufficient stock" in exc_info.value.detail
     assert product.stock == 2  # Stock not decremented
     db.rollback.assert_awaited_once()
@@ -302,15 +339,16 @@ async def test_order_service_success_atomic_transaction():
     prod_result = MagicMock()
     prod_result.scalars.return_value.all.return_value = [product]
 
+    # The atomic UPDATE ... RETURNING returns the product id to confirm decrement happened.
+    stock_update_result = MagicMock()
+    stock_update_result.scalar_one_or_none.return_value = PRODUCT_A_ID
+
     del_result = MagicMock()
 
-    db.execute.side_effect = [cart_result, prod_result, del_result]
+    db.execute.side_effect = [cart_result, prod_result, stock_update_result, del_result]
 
     payload = OrderCreate(**VALID_SHIPPING_PAYLOAD)
     order_read = await order_service.create_order(db, USER_A, payload)
-
-    # Stock decremented atomically
-    assert product.stock == 8
 
     # Order details verified
     assert order_read.status == "pending"
@@ -350,14 +388,17 @@ async def test_order_service_concurrent_checkout_one_succeeds_one_fails():
     cart1 = CartItem(id=uuid.uuid4(), user_id=uuid.UUID(USER_A), product_id=PRODUCT_A_ID, quantity=1)
     r1_cart = MagicMock(); r1_cart.scalars.return_value.all.return_value = [cart1]
     r1_prod = MagicMock(); r1_prod.scalars.return_value.all.return_value = [product]
-    db1.execute.side_effect = [r1_cart, r1_prod, MagicMock()]
+    # Stock UPDATE returns product id (decrement succeeds, stock goes 1 → 0)
+    r1_stock = MagicMock(); r1_stock.scalar_one_or_none.return_value = PRODUCT_A_ID
+    db1.execute.side_effect = [r1_cart, r1_prod, r1_stock, MagicMock()]
 
     order1 = await order_service.create_order(db1, USER_A, OrderCreate(**VALID_SHIPPING_PAYLOAD))
     assert order1.status == "pending"
-    assert product.stock == 0
     db1.commit.assert_awaited_once()
 
-    # Second request with now-exhausted stock
+    # Second request: stock is now 0, so the pre-lock Python check catches it first
+    # (product.stock == 0, quantity == 1 → 0 < 1 → raises 409)
+    product.stock = 0
     db2 = AsyncMock()
     cart2 = CartItem(id=uuid.uuid4(), user_id=uuid.UUID(USER_B), product_id=PRODUCT_A_ID, quantity=1)
     r2_cart = MagicMock(); r2_cart.scalars.return_value.all.return_value = [cart2]
@@ -367,7 +408,7 @@ async def test_order_service_concurrent_checkout_one_succeeds_one_fails():
     with pytest.raises(HTTPException) as exc_info:
         await order_service.create_order(db2, USER_B, OrderCreate(**VALID_SHIPPING_PAYLOAD))
 
-    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc_info.value.status_code == status.HTTP_409_CONFLICT
     assert "Insufficient stock" in exc_info.value.detail
     assert product.stock == 0  # Stock stays 0, never negative
     db2.rollback.assert_awaited_once()
@@ -645,8 +686,10 @@ async def test_create_order_serializes_response():
     cart_result.scalars.return_value.all.return_value = [cart_item]
     prod_result = MagicMock()
     prod_result.scalars.return_value.all.return_value = [product]
+    stock_update_result = MagicMock()
+    stock_update_result.scalar_one_or_none.return_value = PRODUCT_A_ID
     del_result = MagicMock()
-    db.execute.side_effect = [cart_result, prod_result, del_result]
+    db.execute.side_effect = [cart_result, prod_result, stock_update_result, del_result]
 
     payload = OrderCreate(**VALID_SHIPPING_PAYLOAD)
     order_read = await order_service.create_order(db, USER_A, payload)
@@ -666,3 +709,261 @@ async def test_create_order_serializes_response():
     assert isinstance(dumped["items"][0]["line_total_cents"], int)
     assert "created_at" in dumped
 
+
+
+# ---------------------------------------------------------------------------
+# Idempotency key tests (new concurrency guard requirement)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_idempotent_retry_returns_same_order_no_second_insert():
+    """Idempotency: a retry with the same key returns the original order and creates no second order row.
+
+    The first db.scalar call (pre-cart-lock lookup) finds the existing order
+    and the function returns early without touching the cart or products.
+    """
+    db = AsyncMock()
+    db.add = MagicMock()
+
+    existing = sample_order_model()
+    existing.items = [
+        OrderItem(
+            id=uuid.uuid4(),
+            order_id=ORDER_ID,
+            product_id=PRODUCT_A_ID,
+            product_name="Oak Table",
+            unit_price_cents=2999900,
+            quantity=2,
+            line_total_cents=5999800,
+        )
+    ]
+    # Pre-lock idempotency lookup returns the existing order immediately.
+    db.scalar.return_value = existing
+
+    payload = OrderCreate(**VALID_SHIPPING_PAYLOAD)
+    order_read = await order_service.create_order(db, USER_A, payload, idempotency_key="req-abc-123")
+
+    # Must return the existing order unchanged.
+    assert str(order_read.id) == str(ORDER_ID)
+    assert order_read.status == "pending"
+
+    # No new row should be inserted and no commit should happen.
+    db.add.assert_not_called()
+    db.commit.assert_not_awaited()
+    # Rolled back after reading so the transaction stays clean.
+    db.rollback.assert_awaited_once()
+    # Cart and product execute calls must NOT have happened.
+    db.execute.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_idempotent_post_cart_lock_recheck_returns_existing_order():
+    """Racing request: first idempotency check returns None, but after cart lock,
+    the re-check (db.scalar side effect [None, existing_order]) finds the committed
+    order and returns it without touching products or stock.
+    """
+    db = AsyncMock()
+    db.add = MagicMock()
+
+    existing = sample_order_model()
+    existing.items = [
+        OrderItem(
+            id=uuid.uuid4(),
+            order_id=ORDER_ID,
+            product_id=PRODUCT_A_ID,
+            product_name="Oak Table",
+            unit_price_cents=2999900,
+            quantity=2,
+            line_total_cents=5999800,
+        )
+    ]
+    db.scalar.side_effect = [None, existing]
+
+    cart_result = MagicMock()
+    cart_result.scalars.return_value.all.return_value = []
+    db.execute.return_value = cart_result
+
+    payload = OrderCreate(**VALID_SHIPPING_PAYLOAD)
+    order_read = await order_service.create_order(
+        db, USER_A, payload, idempotency_key="race-key-123"
+    )
+
+    assert str(order_read.id) == str(ORDER_ID)
+    assert order_read.status == "pending"
+
+    # Exercised post-cart-lock re-check: db.scalar called twice.
+    assert db.scalar.await_count == 2
+    # Cart lock acquired (1 execute), but products were NOT queried or locked.
+    assert db.execute.await_count == 1
+    # No order inserted, no commit, rolled back to keep transaction clean.
+    db.add.assert_not_called()
+    db.commit.assert_not_awaited()
+    db.rollback.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_idempotent_integrity_error_fallback_returns_existing_order():
+    """Racing request: both requests pass pre- and post-cart-lock checks,
+    but the second flush/commit triggers IntegrityError on uq_orders_user_id_idempotency_key.
+    The IntegrityError fallback queries for the newly committed order and returns it.
+    """
+    db = AsyncMock()
+    db.add = MagicMock()
+
+    existing = sample_order_model()
+    existing.items = [
+        OrderItem(
+            id=uuid.uuid4(),
+            order_id=ORDER_ID,
+            product_id=PRODUCT_A_ID,
+            product_name="Oak Table",
+            unit_price_cents=2999900,
+            quantity=1,
+            line_total_cents=2999900,
+        )
+    ]
+
+    # Call 1 (pre-cart-lock): None
+    # Call 2 (post-cart-lock): None
+    # Call 3 (in except IntegrityError fallback): existing
+    db.scalar.side_effect = [None, None, existing]
+
+    cart_item = CartItem(
+        id=uuid.uuid4(),
+        user_id=uuid.UUID(USER_A),
+        product_id=PRODUCT_A_ID,
+        quantity=1,
+    )
+    product = Product(
+        id=PRODUCT_A_ID,
+        name="Oak Table",
+        slug="oak-table",
+        price_cents=2999900,
+        stock=5,
+        is_active=True,
+    )
+
+    cart_result = MagicMock()
+    cart_result.scalars.return_value.all.return_value = [cart_item]
+    prod_result = MagicMock()
+    prod_result.scalars.return_value.all.return_value = [product]
+    stock_update_result = MagicMock()
+    stock_update_result.scalar_one_or_none.return_value = PRODUCT_A_ID
+
+    db.execute.side_effect = [cart_result, prod_result, stock_update_result]
+    db.flush.side_effect = IntegrityError(
+        "INSERT INTO orders...", {}, Exception("uq_orders_user_id_idempotency_key")
+    )
+
+    payload = OrderCreate(**VALID_SHIPPING_PAYLOAD)
+    order_read = await order_service.create_order(
+        db, USER_A, payload, idempotency_key="race-key-456"
+    )
+
+    assert str(order_read.id) == str(ORDER_ID)
+    assert order_read.status == "pending"
+
+    # 3 scalar calls: pre-cart-lock, post-cart-lock, and inside except IntegrityError
+    assert db.scalar.await_count == 3
+    # Rolled back on IntegrityError, and rolled back after reading the existing order
+    assert db.rollback.await_count == 2
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_insufficient_stock_returns_409_and_changes_nothing():
+    """AC-2 (409 variant): insufficient stock raises 409; no order row inserted, no commit, cart untouched."""
+    db = AsyncMock()
+    db.add = MagicMock()
+
+    cart_item = CartItem(
+        id=uuid.uuid4(),
+        user_id=uuid.UUID(USER_A),
+        product_id=PRODUCT_A_ID,
+        quantity=10,
+    )
+    product = Product(
+        id=PRODUCT_A_ID,
+        name="Rare Chair",
+        slug="rare-chair",
+        price_cents=500000,
+        stock=3,  # Requested 10, only 3 available
+        is_active=True,
+    )
+
+    cart_result = MagicMock()
+    cart_result.scalars.return_value.all.return_value = [cart_item]
+    prod_result = MagicMock()
+    prod_result.scalars.return_value.all.return_value = [product]
+
+    db.execute.side_effect = [cart_result, prod_result]
+    # No idempotency key so db.scalar is never called.
+    db.scalar.return_value = None
+
+    payload = OrderCreate(**VALID_SHIPPING_PAYLOAD)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await order_service.create_order(db, USER_A, payload)
+
+    assert exc_info.value.status_code == status.HTTP_409_CONFLICT
+    assert "Insufficient stock" in exc_info.value.detail
+
+    # Stock must not have been decremented (the conditional UPDATE was never reached).
+    assert product.stock == 3
+
+    # No order inserted, no commit.
+    db.add.assert_not_called()
+    db.commit.assert_not_awaited()
+    db.rollback.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_existing_order_tests_still_pass_with_idempotency_key_none():
+    """Regression: create_order with no idempotency_key still creates order exactly as before."""
+    db = AsyncMock()
+    db.add = MagicMock()
+
+    cart_item = CartItem(
+        id=uuid.uuid4(),
+        user_id=uuid.UUID(USER_A),
+        product_id=PRODUCT_A_ID,
+        quantity=1,
+    )
+    product = Product(
+        id=PRODUCT_A_ID,
+        name="Teak Bench",
+        slug="teak-bench",
+        price_cents=1500000,
+        stock=5,
+        is_active=True,
+    )
+
+    cart_result = MagicMock()
+    cart_result.scalars.return_value.all.return_value = [cart_item]
+    prod_result = MagicMock()
+    prod_result.scalars.return_value.all.return_value = [product]
+    stock_update_result = MagicMock()
+    stock_update_result.scalar_one_or_none.return_value = PRODUCT_A_ID
+    del_result = MagicMock()
+
+    db.execute.side_effect = [cart_result, prod_result, stock_update_result, del_result]
+
+    payload = OrderCreate(**VALID_SHIPPING_PAYLOAD)
+    # No idempotency_key — exercises the original happy path.
+    order_read = await order_service.create_order(db, USER_A, payload, idempotency_key=None)
+
+    assert order_read.status == "pending"
+    assert order_read.total_cents == 1500000
+    assert len(order_read.items) == 1
+    assert order_read.items[0].product_name == "Teak Bench"
+    assert order_read.items[0].unit_price_cents == 1500000
+    assert order_read.items[0].quantity == 1
+    assert order_read.items[0].line_total_cents == 1500000
+    assert isinstance(order_read.total_cents, int)
+
+    db.add.assert_called_once()
+    db.commit.assert_awaited_once()
+    db.rollback.assert_not_awaited()
+    # idempotency key is None, so the idempotency scalar lookup must never fire.
+    db.scalar.assert_not_awaited()

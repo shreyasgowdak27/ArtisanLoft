@@ -20,6 +20,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -32,6 +33,11 @@ class Order(Base):
     __tablename__ = "orders"
     __table_args__ = (
         CheckConstraint("total_cents > 0", name="ck_orders_total_cents_positive"),
+        UniqueConstraint(
+            "user_id",
+            "idempotency_key",
+            name="uq_orders_user_id_idempotency_key",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -52,6 +58,7 @@ class Order(Base):
         server_default="pending",
     )
     total_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     shipping_name: Mapped[str] = mapped_column(String(255), nullable=False)
     shipping_line1: Mapped[str] = mapped_column(String(255), nullable=False)
     shipping_line2: Mapped[str | None] = mapped_column(String(255), nullable=True)
